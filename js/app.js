@@ -460,15 +460,38 @@ function clearImage() {
 
 // --- Model Select ---
 function renderModelSelect() {
+  // 顶栏下拉菜单
   const select = document.getElementById('model-select');
   select.innerHTML = config.models.map(m =>
     `<option value="${m}" ${m === config.defaultModel ? 'selected' : ''}>${m}</option>`
   ).join('');
   select.onchange = () => {
     const session = currentSession();
-    if (session) session.model = select.value;
-    saveSessions();
+    if (session) { session.model = select.value; saveSessions(); }
   };
+
+  // 设置页默认模型下拉
+  const cfgSelect = document.getElementById('cfg-default-model');
+  if (cfgSelect) {
+    cfgSelect.innerHTML = config.models.map(m =>
+      `<option value="${m}" ${m === config.defaultModel ? 'selected' : ''}>${m}</option>`
+    ).join('');
+    cfgSelect.onchange = () => {
+      config.defaultModel = cfgSelect.value;
+      saveConfig();
+      renderModelSelect();
+    };
+  }
+
+  // 设置页模型列表展示
+  const listBox = document.getElementById('cfg-model-list');
+  if (listBox) {
+    if (config.models.length) {
+      listBox.innerHTML = config.models.map(m => `<span class="model-tag">${m}</span>`).join('');
+    } else {
+      listBox.textContent = '暂无模型，请点击刷新';
+    }
+  }
 }
 
 function updateModelSelect() {
@@ -528,6 +551,7 @@ function openSettings() {
   document.getElementById('stat-sessions').textContent = `对话: ${sessions.length}`;
   const totalTokens = sessions.reduce((s, sess) => s + (sess.totalTokens || 0), 0);
   document.getElementById('stat-tokens').textContent = `Tokens: ${totalTokens}`;
+  renderModelSelect(); // 刷新设置页里的模型列表和下拉菜单
   document.getElementById('settings-modal').style.display = 'flex';
 }
 
