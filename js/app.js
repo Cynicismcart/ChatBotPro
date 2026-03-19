@@ -274,9 +274,42 @@ function renderMessage(msg, index) {
     content = msg.content
       ? `<div class="dr-report-streaming">${marked.parse(msg.content)}</div>`
       : `<div class="dr-summary-bar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>正在深度研究中...</div>`;
+  } else if (msg.drMeta) {
+    // 深度研究完成 — Gemini 风格：摘要条 + 可折叠报告
+    const meta = msg.drMeta;
+    const mm = String(Math.floor(meta.elapsed / 60)).padStart(2,'0');
+    const ss = String(meta.elapsed % 60).padStart(2,'0');
+    let reportHtml = marked.parse(msg.content || '');
+    if (msg.sources && msg.sources.length > 0) {
+      reportHtml = reportHtml.replace(/\[(\d+)\]/g, (match, num) => {
+        const src = msg.sources.find(s => s.index === parseInt(num));
+        if (src?.url) return `<a class="cite-badge" href="${escapeHtml(src.url)}" target="_blank" title="${escapeHtml(src.title)}">${num}</a>`;
+        return match;
+      });
+    }
+    const msgId = index;
+    content = `
+      <div class="dr-result">
+        <div class="dr-result-meta" onclick="document.getElementById('dr-result-body-${msgId}').classList.toggle('open')">
+          <div class="dr-result-meta-left">
+            <div class="dr-result-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </div>
+            <span class="dr-result-label">深度研究完成</span>
+            <span class="dr-result-stat">${meta.steps} 步</span>
+            <span class="dr-result-dot">·</span>
+            <span class="dr-result-stat">${meta.sources} 个来源</span>
+            <span class="dr-result-dot">·</span>
+            <span class="dr-result-stat">${mm}:${ss}</span>
+          </div>
+          <svg class="dr-result-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="dr-result-body open" id="dr-result-body-${msgId}">
+          <div class="dr-result-report">${reportHtml}</div>
+        </div>
+      </div>`;
   } else {
     content = marked.parse(msg.content || '');
-    // 将 [1] [2] 等转为可点击的引用标签
     if (msg.sources && msg.sources.length > 0) {
       content = content.replace(/\[(\d+)\]/g, (match, num) => {
         const idx = parseInt(num);
@@ -503,11 +536,16 @@ async function handleDeepResearch() {
       aiMsg.sources = sources;
       aiMsg.streaming = false;
       aiMsg.deepResearch = false;
+      // 保存研究元数据用于渲染
+      aiMsg.drMeta = {
+        steps: window.researchState.steps.length,
+        sources: sources.length,
+        elapsed: window.researchState.startTime ? Math.floor((Date.now() - window.researchState.startTime) / 1000) : 0
+      };
       // 进度条到100%
       const fill = document.getElementById('dr-progress-fill');
       if (fill) { fill.style.width = '100%'; fill.classList.remove('running'); }
       updateDRPanel();
-      // 关闭停止按钮，面板留着让用户查看
       const stopBtn = document.getElementById('dr-stop-btn');
       if (stopBtn) stopBtn.style.display = 'none';
       setStreamingUI(false);
