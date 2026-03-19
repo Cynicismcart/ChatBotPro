@@ -702,6 +702,230 @@ body {
   z-index: 9;
 }
 
+/* ============================================================
+   Deep Research UI
+   ============================================================ */
+
+.deep-research-btn { color: var(--text2); }
+.deep-research-btn.active { color: var(--accent); background: var(--accent-light); }
+
+.deep-research-panel {
+  background: var(--bg2);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.dr-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text1);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dr-title-icon {
+  width: 20px;
+  height: 20px;
+  background: var(--accent-light);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.dr-timer {
+  font-size: 12px;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+  font-family: monospace;
+}
+
+.dr-progress-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.dr-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.dr-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+  animation: dr-shimmer 1.5s infinite;
+}
+
+@keyframes dr-shimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+.dr-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  margin-left: 8px;
+}
+
+.dr-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text2);
+  transition: color 0.2s;
+}
+
+.dr-step.done { color: var(--text1); }
+.dr-step.active { color: var(--accent); font-weight: 500; }
+.dr-step.error { color: #ef4444; }
+
+.dr-step-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  border: 1.5px solid var(--border);
+  background: var(--bg2);
+  color: var(--text3);
+}
+
+.dr-step.done .dr-step-icon {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #fff;
+}
+
+.dr-step.active .dr-step-icon {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: dr-pulse 1.2s infinite;
+}
+
+.dr-step.error .dr-step-icon {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+@keyframes dr-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.9); }
+}
+
+.dr-step-label {
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.dr-sources-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.dr-sources-title {
+  font-size: 12px;
+  color: var(--text3);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.dr-sources-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.dr-source-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--text2);
+  text-decoration: none;
+  transition: all 0.15s;
+  max-width: 180px;
+  overflow: hidden;
+  animation: dr-fadeIn 0.3s ease;
+}
+
+.dr-source-chip:hover {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.dr-source-chip img {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.dr-source-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes dr-fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dr-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text3);
+  padding: 6px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  margin-bottom: 10px;
+  width: fit-content;
+}
+
+.dr-summary-bar svg { flex-shrink: 0; }
+
 /* Mobile */
 @media (max-width: 768px) {
   .sidebar {

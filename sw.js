@@ -1,9 +1,10 @@
-const CACHE_NAME = 'chatbot-v7';
+const CACHE_NAME = 'chatbot-v8';
 const ASSETS = [
   './',
   './index.html',
   './css/style.css',
   './js/app.js',
+  './js/deep-research.js',
   './manifest.json'
 ];
 

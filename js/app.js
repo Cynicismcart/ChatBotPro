@@ -134,6 +134,9 @@ function bindEvents() {
   $('btn-search-toggle').onclick = toggleSearch;
   updateSearchBtn();
 
+  // Deep research
+  $('btn-deep-research').onclick = handleDeepResearch;
+
   // Image
   $('image-input').onchange = handleImageSelect;
   $('btn-clear-img').onclick = clearImage;
@@ -255,6 +258,9 @@ function renderMessage(msg, index) {
   if (isUser) {
     if (msg.image) content += `<img src="${msg.image}" alt="图片">`;
     content += escapeHtml(msg.content);
+  } else if (msg.deepResearch && msg.streaming) {
+    content = renderDeepResearchPanel(msg);
+    if (msg.content) content += `<div class="dr-report-streaming">${marked.parse(msg.content)}</div>`;
   } else {
     content = marked.parse(msg.content || '');
     // 将 [1] [2] 等转为可点击的引用标签
@@ -324,6 +330,160 @@ function updateTokenCount() {
   } else {
     el.textContent = '';
   }
+}
+
+// --- Deep Research ---
+function renderDeepResearchPanel(aiMsg) {
+  const state = window.researchState;
+  const elapsed = state.startTime ? Math.floor((Date.now() - state.startTime) / 1000) : 0;
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+
+  const totalSteps = state.steps.length;
+  const doneSteps = state.steps.filter(s => s.status === 'done').length;
+  const pct = totalSteps > 0 ? Math.round((doneSteps / Math.max(totalSteps, 1)) * 100) : 5;
+
+  const stepsHtml = state.steps.map(step => {
+    const iconMap = { done: '✓', active: '•', error: '✕', pending: '○' };
+    const icon = iconMap[step.status] || '○';
+    return `<div class="dr-step ${step.status}">
+      <div class="dr-step-icon">${icon}</div>
+      <div class="dr-step-label">${escapeHtml(step.label)}</div>
+    </div>`;
+  }).join('');
+
+  let sourcesHtml = '';
+  if (state.sources.length > 0) {
+    const chips = state.sources.map(s => {
+      const domain = getDomain(s.url);
+      const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+      return `<a class="dr-source-chip" href="${escapeHtml(s.url)}" target="_blank">
+        <img src="${favicon}" alt="" onerror="this.style.display='none'">
+        <span>${escapeHtml(domain)}</span>
+      </a>`;
+    }).join('');
+    sourcesHtml = `<div class="dr-sources-section">
+      <div class="dr-sources-title">已收集 ${state.sources.length} 个来源</div>
+      <div class="dr-sources-grid">${chips}</div>
+    </div>`;
+  }
+
+  return `<div class="deep-research-panel">
+    <div class="dr-header">
+      <div class="dr-title">
+        <div class="dr-title-icon">🔬</div>
+        深度研究中
+      </div>
+      <div class="dr-timer">${mm}:${ss}</div>
+    </div>
+    <div class="dr-progress-bar"><div class="dr-progress-fill" style="width:${pct}%"></div></div>
+    <div class="dr-steps">${stepsHtml}</div>
+    ${sourcesHtml}
+  </div>`;
+}
+
+async function handleDeepResearch() {
+  if (isStreaming) { stopStreaming(); return; }
+
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text) { alert('请输入研究主题'); return; }
+  if (!config.searchWorkerURL && !config.tavilyKey) {
+    alert('深度研究需要搜索功能，请先在设置中配置搜索 Worker URL 或 Tavily Key'); return;
+  }
+  if (!config.baseURL || !config.apiKey) { openSettings(); return; }
+
+  if (!currentSessionId) createSession();
+  const session = currentSession();
+
+  session.messages.push({ role: 'user', content: text });
+  if (session.messages.length === 1) {
+    session.title = '🔬 ' + text.slice(0, 18) + (text.length > 18 ? '...' : '');
+    renderSessionList();
+  }
+  input.value = ''; input.style.height = 'auto';
+  clearImage();
+
+  const aiMsg = { role: 'assistant', content: '', streaming: true, tokens: 0, sources: null, deepResearch: true };
+  session.messages.push(aiMsg);
+  session.updatedAt = Date.now();
+  saveSessions();
+  renderChat();
+  setStreamingUI(true);
+
+  // 启动计时器刷新进度面板
+  const timerInterval = setInterval(() => {
+    if (!window.researchState.isRunning) { clearInterval(timerInterval); return; }
+    updateDeepResearchPanel(aiMsg);
+  }, 1000);
+
+  await window.startDeepResearch(text, {
+    config,
+    session,
+    aiMsg,
+    onProgress: () => updateDeepResearchPanel(aiMsg),
+    onReportDelta: (delta) => {
+      aiMsg.content += delta;
+      // 流式更新报告区
+      const msgs = document.getElementById('messages');
+      const lastBubble = msgs.querySelector('.message.assistant:last-child .bubble');
+      if (lastBubble) {
+        const panel = lastBubble.querySelector('.deep-research-panel');
+        let reportEl = lastBubble.querySelector('.dr-report-streaming');
+        if (!reportEl) {
+          reportEl = document.createElement('div');
+          reportEl.className = 'dr-report-streaming';
+          lastBubble.appendChild(reportEl);
+        }
+        reportEl.innerHTML = marked.parse(aiMsg.content);
+        scrollToBottom();
+      }
+    },
+    onComplete: (sources) => {
+      clearInterval(timerInterval);
+      aiMsg.sources = sources;
+      aiMsg.streaming = false;
+      aiMsg.deepResearch = false;
+      setStreamingUI(false);
+      saveSessions();
+      renderChat();
+      updateTokenCount();
+    },
+    onError: (err) => {
+      clearInterval(timerInterval);
+      aiMsg.content = aiMsg.content || `研究失败: ${err}`;
+      aiMsg.streaming = false;
+      aiMsg.deepResearch = false;
+      setStreamingUI(false);
+      saveSessions();
+      renderChat();
+    }
+  });
+}
+
+function updateDeepResearchPanel(aiMsg) {
+  const msgs = document.getElementById('messages');
+  const lastBubble = msgs.querySelector('.message.assistant:last-child .bubble');
+  if (!lastBubble) return;
+  const panel = lastBubble.querySelector('.deep-research-panel');
+  const newPanelHtml = renderDeepResearchPanel(aiMsg);
+  if (panel) {
+    panel.outerHTML = newPanelHtml;
+  } else {
+    lastBubble.innerHTML = newPanelHtml;
+  }
+  // 重新追加正在流式输出的报告
+  if (aiMsg.content) {
+    const bubble = lastBubble.closest ? lastBubble : msgs.querySelector('.message.assistant:last-child .bubble');
+    let reportEl = bubble.querySelector('.dr-report-streaming');
+    if (!reportEl) {
+      reportEl = document.createElement('div');
+      reportEl.className = 'dr-report-streaming';
+      bubble.appendChild(reportEl);
+    }
+    reportEl.innerHTML = marked.parse(aiMsg.content);
+  }
+  scrollToBottom();
 }
 
 // --- Send Message ---
@@ -476,6 +636,7 @@ function updateStreamingMessage(aiMsg) {
 }
 
 function stopStreaming() {
+  if (window.researchState?.isRunning) window.abortDeepResearch();
   if (abortController) abortController.abort();
   abortController = null;
   const session = currentSession();
