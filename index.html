@@ -109,8 +109,10 @@
           <option value="5">5 条</option>
           <option value="8">8 条</option>
         </select>
-        <label>Tavily Search API Key <a href="https://tavily.com" target="_blank" style="color:var(--accent);font-weight:400">(免费注册)</a></label>
+        <label>Tavily Search API Key <a href="https://tavily.com" target="_blank" style="color:var(--accent);font-weight:400">(免费1000次/月)</a></label>
         <input id="cfg-tavily-key" type="password" placeholder="tvly-...">
+        <label>搜索代理地址 <span style="font-weight:400;color:var(--text3)">(自建Worker，免费无限)</span></label>
+        <input id="cfg-search-worker" type="url" placeholder="https://your-worker.workers.dev">
         <div class="modal-actions">
           <button id="btn-fetch-models" class="secondary-btn">刷新模型列表</button>
           <button id="btn-save-settings" class="primary-btn">保存</button>

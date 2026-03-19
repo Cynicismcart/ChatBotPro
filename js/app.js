@@ -12,7 +12,8 @@ const DEFAULT_CONFIG = {
   models: [],
   searchEnabled: false,
   searchCount: 5,
-  tavilyKey: ''
+  tavilyKey: '',
+  searchWorkerURL: ''
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -530,8 +531,8 @@ function clearImage() {
 
 // --- Web Search ---
 function toggleSearch() {
-  if (!config.tavilyKey) {
-    alert('请先在设置中填写 Tavily API Key\n免费注册: tavily.com');
+  if (!config.tavilyKey && !config.searchWorkerURL) {
+    alert('请先在设置中配置搜索：\n\n方式一：填写 Tavily API Key（免费1000次/月）\n方式二：填写自建搜索代理地址（完全免费无限）');
     return;
   }
   config.searchEnabled = !config.searchEnabled;
@@ -552,7 +553,15 @@ function updateSearchBtn() {
 
 async function webSearch(query) {
   try {
-    const results = await searchWithTavily(query);
+    let results = null;
+
+    // 优先用自建 Worker（免费无限），其次 Tavily
+    if (config.searchWorkerURL) {
+      results = await searchWithWorker(query);
+    }
+    if ((!results || results.length === 0) && config.tavilyKey) {
+      results = await searchWithTavily(query);
+    }
     if (!results || results.length === 0) return null;
 
     const sources = results.slice(0, config.searchCount).map((r, i) => ({
@@ -580,6 +589,19 @@ function withTimeout(promise, ms) {
   ]);
 }
 
+async function searchWithWorker(query) {
+  try {
+    const url = `${config.searchWorkerURL.replace(/\/+$/, '')}?q=${encodeURIComponent(query)}&count=${config.searchCount || 5}`;
+    const resp = await withTimeout(fetch(url), 10000);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.results || null;
+  } catch (err) {
+    console.error('Worker search error:', err);
+    return null;
+  }
+}
+
 async function searchWithTavily(query) {
   try {
     const resp = await withTimeout(fetch('https://api.tavily.com/search', {
@@ -594,11 +616,7 @@ async function searchWithTavily(query) {
       })
     }), 10000);
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail?.error || `HTTP ${resp.status}`);
-    }
-
+    if (!resp.ok) return null;
     const data = await resp.json();
     if (data.results && data.results.length > 0) {
       return data.results.map(r => ({
@@ -706,6 +724,7 @@ function openSettings() {
   document.getElementById('cfg-theme').value = config.theme;
   document.getElementById('cfg-search-count').value = config.searchCount || 5;
   document.getElementById('cfg-tavily-key').value = config.tavilyKey || '';
+  document.getElementById('cfg-search-worker').value = config.searchWorkerURL || '';
   document.getElementById('stat-sessions').textContent = `对话: ${sessions.length}`;
   const totalTokens = sessions.reduce((s, sess) => s + (sess.totalTokens || 0), 0);
   document.getElementById('stat-tokens').textContent = `Tokens: ${totalTokens}`;
@@ -720,6 +739,7 @@ function saveSettings() {
   config.theme = document.getElementById('cfg-theme').value;
   config.searchCount = parseInt(document.getElementById('cfg-search-count').value) || 5;
   config.tavilyKey = document.getElementById('cfg-tavily-key').value.trim();
+  config.searchWorkerURL = document.getElementById('cfg-search-worker').value.trim().replace(/\/+$/, '');
   saveConfig();
   applyTheme();
   document.getElementById('settings-modal').style.display = 'none';
