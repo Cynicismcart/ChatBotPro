@@ -9,7 +9,9 @@ const DEFAULT_CONFIG = {
   systemPrompt: 'You are a helpful assistant.',
   theme: 'system',
   defaultModel: '',
-  models: []
+  models: [],
+  searchEnabled: false,
+  searchCount: 5
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -125,6 +127,10 @@ function bindEvents() {
       handleSend();
     }
   });
+
+  // Search toggle
+  $('btn-search-toggle').onclick = toggleSearch;
+  updateSearchBtn();
 
   // Image
   $('image-input').onchange = handleImageSelect;
@@ -311,7 +317,22 @@ async function handleSend() {
   // Build API messages
   const apiMessages = [];
   const sysPrompt = session.systemPrompt || config.systemPrompt;
-  if (sysPrompt) apiMessages.push({ role: 'system', content: sysPrompt });
+
+  // 联网搜索
+  let searchContext = '';
+  if (config.searchEnabled && text) {
+    aiMsg.content = '正在搜索...';
+    updateStreamingMessage(aiMsg);
+    const searchResults = await webSearch(text);
+    if (searchResults) {
+      searchContext = `\n\n以下是从互联网搜索到的相关信息，请基于这些信息回答用户的问题。如果搜索结果与问题无关，可以忽略。请在回答中标注信息来源。\n\n---搜索结果---\n${searchResults}\n---搜索结果结束---\n`;
+    }
+    aiMsg.content = '';
+  }
+
+  if (sysPrompt || searchContext) {
+    apiMessages.push({ role: 'system', content: (sysPrompt || '') + searchContext });
+  }
 
   for (const m of session.messages) {
     if (m.role === 'assistant' && m.streaming) continue;
@@ -458,6 +479,125 @@ function clearImage() {
   updateSendBtn();
 }
 
+// --- Web Search ---
+function toggleSearch() {
+  config.searchEnabled = !config.searchEnabled;
+  saveConfig();
+  updateSearchBtn();
+}
+
+function updateSearchBtn() {
+  const btn = document.getElementById('btn-search-toggle');
+  if (config.searchEnabled) {
+    btn.classList.add('active');
+    btn.title = '联网搜索: 开';
+  } else {
+    btn.classList.remove('active');
+    btn.title = '联网搜索: 关';
+  }
+}
+
+async function webSearch(query) {
+  try {
+    // 用 LLM 提取搜索关键词
+    const keywords = await extractSearchKeywords(query);
+    if (!keywords) return null;
+
+    // 用多个搜索源尝试
+    let results = await searchWithDuckDuckGo(keywords);
+    if (!results || results.length === 0) {
+      results = await searchWithSearXNG(keywords);
+    }
+    if (!results || results.length === 0) return null;
+
+    // 格式化搜索结果
+    const formatted = results.slice(0, config.searchCount).map((r, i) =>
+      `[${i + 1}] ${r.title}\n${r.snippet}\n来源: ${r.url}`
+    ).join('\n\n');
+
+    return formatted;
+  } catch (err) {
+    console.error('Web search failed:', err);
+    return null;
+  }
+}
+
+async function extractSearchKeywords(query) {
+  try {
+    const resp = await fetch(`${config.baseURL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: config.defaultModel,
+        messages: [
+          { role: 'system', content: '你是一个搜索关键词提取器。用户会给你一个问题，你需要提取出最适合搜索引擎的关键词（英文或中文均可）。只输出关键词，不要输出其他内容。如果问题不需要搜索（比如纯数学计算、编程问题），输出 NOSEARCH。' },
+          { role: 'user', content: query }
+        ],
+        max_tokens: 50,
+        stream: false
+      })
+    });
+    if (!resp.ok) return query;
+    const data = await resp.json();
+    const kw = data.choices?.[0]?.message?.content?.trim();
+    if (!kw || kw === 'NOSEARCH') return null;
+    return kw;
+  } catch {
+    return query; // fallback: 直接用原始问题搜索
+  }
+}
+
+async function searchWithDuckDuckGo(query) {
+  try {
+    const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const results = [];
+    // Abstract
+    if (data.Abstract) {
+      results.push({ title: data.Heading || query, snippet: data.Abstract, url: data.AbstractURL || '' });
+    }
+    // Related topics
+    if (data.RelatedTopics) {
+      for (const topic of data.RelatedTopics) {
+        if (topic.Text && results.length < 8) {
+          results.push({ title: topic.Text.slice(0, 80), snippet: topic.Text, url: topic.FirstURL || '' });
+        }
+      }
+    }
+    return results.length > 0 ? results : null;
+  } catch { return null; }
+}
+
+async function searchWithSearXNG(query) {
+  // 尝试多个公共 SearXNG 实例
+  const instances = [
+    'https://search.bus-hit.me',
+    'https://searx.tiekoetter.com',
+    'https://search.ononoki.org'
+  ];
+  for (const base of instances) {
+    try {
+      const resp = await fetch(`${base}/search?q=${encodeURIComponent(query)}&format=json&categories=general&language=auto`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (data.results && data.results.length > 0) {
+        return data.results.slice(0, 8).map(r => ({
+          title: r.title || '',
+          snippet: r.content || '',
+          url: r.url || ''
+        }));
+      }
+    } catch { continue; }
+  }
+  return null;
+}
+
 // --- Model Select ---
 function renderModelSelect() {
   // 顶栏下拉菜单
@@ -548,6 +688,7 @@ function openSettings() {
   document.getElementById('cfg-key').value = config.apiKey;
   document.getElementById('cfg-prompt').value = config.systemPrompt;
   document.getElementById('cfg-theme').value = config.theme;
+  document.getElementById('cfg-search-count').value = config.searchCount || 5;
   document.getElementById('stat-sessions').textContent = `对话: ${sessions.length}`;
   const totalTokens = sessions.reduce((s, sess) => s + (sess.totalTokens || 0), 0);
   document.getElementById('stat-tokens').textContent = `Tokens: ${totalTokens}`;
@@ -560,6 +701,7 @@ function saveSettings() {
   config.apiKey = document.getElementById('cfg-key').value;
   config.systemPrompt = document.getElementById('cfg-prompt').value;
   config.theme = document.getElementById('cfg-theme').value;
+  config.searchCount = parseInt(document.getElementById('cfg-search-count').value) || 5;
   saveConfig();
   applyTheme();
   document.getElementById('settings-modal').style.display = 'none';

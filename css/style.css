@@ -395,6 +395,21 @@ body {
 .send-btn:disabled { opacity: 0.4; cursor: default; }
 .send-btn.streaming { background: var(--danger); }
 
+/* Search toggle */
+.search-toggle { position: relative; transition: color 0.2s; }
+.search-toggle.active { color: var(--accent); }
+.search-toggle.active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
 /* Icon buttons */
 .icon-btn {
   background: none;
