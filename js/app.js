@@ -386,6 +386,10 @@ function updateDRPanel() {
     if (planText) planText.textContent = state.plan;
   }
 
+  // 步骤计数
+  const stepCount = document.getElementById('dr-step-count');
+  if (stepCount) stepCount.textContent = `${state.steps.filter(s=>s.status==='done').length}/${state.steps.length}`;
+
   // 步骤列表
   const stepsList = document.getElementById('dr-steps-list');
   if (stepsList) {

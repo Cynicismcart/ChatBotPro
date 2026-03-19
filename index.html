@@ -104,15 +104,35 @@
       <div class="dr-panel-progress-fill" id="dr-progress-fill"></div>
     </div>
     <div class="dr-panel-body">
-      <div id="dr-plan-section" class="dr-plan-section" style="display:none">
-        <div class="dr-section-label">研究计划</div>
-        <div id="dr-plan-text" class="dr-plan-text"></div>
+      <!-- 研究计划（可折叠）-->
+      <div id="dr-plan-section" class="dr-collapsible-section" style="display:none">
+        <button class="dr-collapse-btn" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="dr-section-label">研究计划</span>
+          <svg class="dr-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="dr-collapse-body">
+          <div id="dr-plan-text" class="dr-plan-text"></div>
+        </div>
       </div>
-      <div class="dr-section-label" style="margin-top:12px">研究步骤</div>
-      <div id="dr-steps-list" class="dr-steps-list"></div>
-      <div id="dr-sources-panel" class="dr-sources-panel" style="display:none">
-        <div class="dr-section-label">已收集来源 <span id="dr-source-count">0</span></div>
-        <div id="dr-sources-chips" class="dr-sources-chips"></div>
+      <!-- 研究步骤（可折叠）-->
+      <div id="dr-steps-section" class="dr-collapsible-section">
+        <button class="dr-collapse-btn" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="dr-section-label">研究步骤 <span id="dr-step-count"></span></span>
+          <svg class="dr-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="dr-collapse-body">
+          <div id="dr-steps-list" class="dr-steps-list"></div>
+        </div>
+      </div>
+      <!-- 来源（可折叠）-->
+      <div id="dr-sources-panel" class="dr-collapsible-section" style="display:none">
+        <button class="dr-collapse-btn" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="dr-section-label">已收集来源 <span id="dr-source-count" class="dr-badge">0</span></span>
+          <svg class="dr-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="dr-collapse-body">
+          <div id="dr-sources-chips" class="dr-sources-chips"></div>
+        </div>
       </div>
     </div>
   </div>

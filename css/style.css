@@ -952,6 +952,60 @@ body {
   margin-top: 4px;
 }
 
+/* 折叠组件 */
+.dr-collapsible-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.dr-collapse-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  gap: 8px;
+}
+
+.dr-collapse-btn:hover { background: var(--bg3); }
+
+.dr-chevron {
+  flex-shrink: 0;
+  color: var(--text3);
+  transition: transform 0.2s;
+}
+
+.dr-collapsible-section.collapsed .dr-chevron { transform: rotate(-90deg); }
+
+.dr-collapse-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg1);
+}
+
+.dr-collapsible-section.collapsed .dr-collapse-body { display: none; }
+
+.dr-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
 /* 研究计划 */
 .dr-plan-section {
   background: var(--accent-light);
