@@ -15,7 +15,8 @@ const DEFAULT_CONFIG = {
   tavilyKey: '',
   searchWorkerURL: '',
   providers: [],        // [{name, baseURL, apiKey, models, defaultModel}]
-  currentProvider: -1  // -1 = 使用手动配置，>=0 = providers 数组索引
+  currentProvider: -1, // -1 = 使用手动配置，>=0 = providers 数组索引
+  searchMode: 'on'     // 'off' | 'on' | 'auto'
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -533,7 +534,9 @@ async function handleSend() {
 
   // 联网搜索
   let searchContext = '';
-  if (config.searchEnabled && text) {
+  const hasSearchProvider = config.searchWorkerURL || config.tavilyKey;
+  const shouldSearch = hasSearchProvider && text && await decideSearch(text);
+  if (shouldSearch) {
     aiMsg.content = '🔍 正在搜索...';
     updateStreamingMessage(aiMsg);
     try {
@@ -711,12 +714,54 @@ function toggleSearch() {
 
 function updateSearchBtn() {
   const btn = document.getElementById('btn-search-toggle');
-  if (config.searchEnabled) {
+  const mode = config.searchMode || 'on';
+  if (mode === 'off') {
+    btn.style.display = 'none';
+  } else if (mode === 'auto') {
+    btn.style.display = 'flex';
     btn.classList.add('active');
-    btn.title = '联网搜索: 开';
+    btn.title = '联网搜索: AI自动';
   } else {
-    btn.classList.remove('active');
-    btn.title = '联网搜索: 关';
+    btn.style.display = 'flex';
+    if (config.searchEnabled) {
+      btn.classList.add('active');
+      btn.title = '联网搜索: 开';
+    } else {
+      btn.classList.remove('active');
+      btn.title = '联网搜索: 关';
+    }
+  }
+}
+
+// 判断是否需要联网：手动模式直接看开关，自动模式问 AI
+async function decideSearch(text) {
+  if (config.searchMode === 'off' || !config.searchWorkerURL && !config.tavilyKey) return false;
+  if (config.searchMode === 'on') return config.searchEnabled;
+  // auto 模式：快速问 AI
+  try {
+    const resp = await Promise.race([
+      fetch(`${config.baseURL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+        body: JSON.stringify({
+          model: config.defaultModel,
+          max_tokens: 5,
+          temperature: 0,
+          stream: false,
+          messages: [
+            { role: 'system', content: '判断用户的问题是否需要搜索互联网才能回答（涉及实时信息、新闻、当前价格、最新事件等）。只回答 yes 或 no。' },
+            { role: 'user', content: text }
+          ]
+        })
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+    ]);
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    const answer = (data.choices?.[0]?.message?.content || '').toLowerCase().trim();
+    return answer.startsWith('yes');
+  } catch (e) {
+    return false;
   }
 }
 
@@ -1003,6 +1048,7 @@ function openSettings() {
   document.getElementById('cfg-key').value = config.apiKey;
   document.getElementById('cfg-prompt').value = config.systemPrompt;
   document.getElementById('cfg-theme').value = config.theme;
+  document.getElementById('cfg-search-mode').value = config.searchMode || 'on';
   document.getElementById('cfg-search-count').value = config.searchCount || 5;
   document.getElementById('cfg-tavily-key').value = config.tavilyKey || '';
   document.getElementById('cfg-search-worker').value = config.searchWorkerURL || '';
@@ -1019,6 +1065,7 @@ function saveSettings() {
   config.apiKey = document.getElementById('cfg-key').value;
   config.systemPrompt = document.getElementById('cfg-prompt').value;
   config.theme = document.getElementById('cfg-theme').value;
+  config.searchMode = document.getElementById('cfg-search-mode').value || 'on';
   config.searchCount = parseInt(document.getElementById('cfg-search-count').value) || 5;
   config.tavilyKey = document.getElementById('cfg-tavily-key').value.trim();
   config.searchWorkerURL = document.getElementById('cfg-search-worker').value.trim().replace(/\/+$/, '');
