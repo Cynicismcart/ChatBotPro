@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chatbot-v5';
+const CACHE_NAME = 'chatbot-v6';
 const ASSETS = [
   './',
   './index.html',

@@ -11,7 +11,8 @@ const DEFAULT_CONFIG = {
   defaultModel: '',
   models: [],
   searchEnabled: false,
-  searchCount: 5
+  searchCount: 5,
+  tavilyKey: ''
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -529,6 +530,10 @@ function clearImage() {
 
 // --- Web Search ---
 function toggleSearch() {
+  if (!config.tavilyKey) {
+    alert('请先在设置中填写 Tavily API Key\n免费注册: tavily.com');
+    return;
+  }
   config.searchEnabled = !config.searchEnabled;
   saveConfig();
   updateSearchBtn();
@@ -547,18 +552,7 @@ function updateSearchBtn() {
 
 async function webSearch(query) {
   try {
-    // 直接用用户问题作为搜索词（跳过 LLM 提取，避免额外延迟）
-    const keywords = query.slice(0, 100);
-
-    // 依次尝试多个搜索源
-    let results = null;
-    const searchFns = [searchWithSearXNG, searchWithDuckDuckGo];
-    for (const fn of searchFns) {
-      try {
-        results = await withTimeout(fn(keywords), 8000);
-        if (results && results.length > 0) break;
-      } catch { continue; }
-    }
+    const results = await searchWithTavily(query);
     if (!results || results.length === 0) return null;
 
     const sources = results.slice(0, config.searchCount).map((r, i) => ({
@@ -586,65 +580,38 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-function corsProxy(url) {
-  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-}
-
-async function searchWithSearXNG(query) {
-  const instances = [
-    'https://searx.be',
-    'https://search.sapti.me',
-    'https://searx.tiekoetter.com',
-    'https://search.ononoki.org'
-  ];
-  for (const base of instances) {
-    try {
-      const url = `${base}/search?q=${encodeURIComponent(query)}&format=json&categories=general&language=auto`;
-      // 先直接请求，失败再走代理
-      let resp;
-      try {
-        resp = await withTimeout(fetch(url), 4000);
-      } catch {
-        resp = await withTimeout(fetch(corsProxy(url)), 5000);
-      }
-      if (!resp.ok) continue;
-      const data = await resp.json();
-      if (data.results && data.results.length > 0) {
-        return data.results.slice(0, 8).map(r => ({
-          title: r.title || '',
-          snippet: r.content || '',
-          url: r.url || ''
-        }));
-      }
-    } catch { continue; }
-  }
-  return null;
-}
-
-async function searchWithDuckDuckGo(query) {
+async function searchWithTavily(query) {
   try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    let resp;
-    try {
-      resp = await withTimeout(fetch(url), 4000);
-    } catch {
-      resp = await withTimeout(fetch(corsProxy(url)), 5000);
+    const resp = await withTimeout(fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: config.tavilyKey,
+        query: query,
+        max_results: config.searchCount || 5,
+        include_answer: false,
+        search_depth: 'basic'
+      })
+    }), 10000);
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail?.error || `HTTP ${resp.status}`);
     }
-    if (!resp.ok) return null;
+
     const data = await resp.json();
-    const results = [];
-    if (data.Abstract) {
-      results.push({ title: data.Heading || query, snippet: data.Abstract, url: data.AbstractURL || '' });
+    if (data.results && data.results.length > 0) {
+      return data.results.map(r => ({
+        title: r.title || '',
+        snippet: r.content || '',
+        url: r.url || ''
+      }));
     }
-    if (data.RelatedTopics) {
-      for (const topic of data.RelatedTopics) {
-        if (topic.Text && results.length < 8) {
-          results.push({ title: topic.Text.slice(0, 80), snippet: topic.Text, url: topic.FirstURL || '' });
-        }
-      }
-    }
-    return results.length > 0 ? results : null;
-  } catch { return null; }
+    return null;
+  } catch (err) {
+    console.error('Tavily search error:', err);
+    return null;
+  }
 }
 
 // --- Model Select ---
@@ -738,6 +705,7 @@ function openSettings() {
   document.getElementById('cfg-prompt').value = config.systemPrompt;
   document.getElementById('cfg-theme').value = config.theme;
   document.getElementById('cfg-search-count').value = config.searchCount || 5;
+  document.getElementById('cfg-tavily-key').value = config.tavilyKey || '';
   document.getElementById('stat-sessions').textContent = `对话: ${sessions.length}`;
   const totalTokens = sessions.reduce((s, sess) => s + (sess.totalTokens || 0), 0);
   document.getElementById('stat-tokens').textContent = `Tokens: ${totalTokens}`;
@@ -751,6 +719,7 @@ function saveSettings() {
   config.systemPrompt = document.getElementById('cfg-prompt').value;
   config.theme = document.getElementById('cfg-theme').value;
   config.searchCount = parseInt(document.getElementById('cfg-search-count').value) || 5;
+  config.tavilyKey = document.getElementById('cfg-tavily-key').value.trim();
   saveConfig();
   applyTheme();
   document.getElementById('settings-modal').style.display = 'none';
