@@ -2,7 +2,7 @@
   "name": "ChatBot Pro",
   "short_name": "ChatBot",
   "description": "AI 聊天助手",
-  "start_url": "/index.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#6366f1",

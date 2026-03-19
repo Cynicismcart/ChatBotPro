@@ -1,9 +1,10 @@
-const CACHE_NAME = 'chatbot-v1';
+const CACHE_NAME = 'chatbot-v2';
 const ASSETS = [
-  '/index.html',
-  '/css/style.css',
-  '/js/app.js',
-  '/manifest.json'
+  './',
+  './index.html',
+  './css/style.css',
+  './js/app.js',
+  './manifest.json'
 ];
 
 self.addEventListener('install', e => {
