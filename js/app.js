@@ -364,12 +364,16 @@ async function handleSend() {
   // 联网搜索
   let searchContext = '';
   if (config.searchEnabled && text) {
-    aiMsg.content = '正在搜索...';
+    aiMsg.content = '🔍 正在搜索...';
     updateStreamingMessage(aiMsg);
-    const searchData = await webSearch(text);
-    if (searchData && searchData.formatted) {
-      searchContext = `\n\n以下是从互联网搜索到的相关信息，请基于这些信息回答用户的问题。请在回答中使用 [1]、[2] 等编号引用对应的搜索结果来源。如果搜索结果与问题无关，可以忽略。\n\n---搜索结果---\n${searchData.formatted}\n---搜索结果结束---\n`;
-      aiMsg.sources = searchData.sources;
+    try {
+      const searchData = await withTimeout(webSearch(text), 15000);
+      if (searchData && searchData.formatted) {
+        searchContext = `\n\n以下是从互联网搜索到的相关信息，请基于这些信息回答用户的问题。请在回答中使用 [1]、[2] 等编号引用对应的搜索结果来源。如果搜索结果与问题无关，可以忽略。\n\n---搜索结果---\n${searchData.formatted}\n---搜索结果结束---\n`;
+        aiMsg.sources = searchData.sources;
+      }
+    } catch (err) {
+      console.error('Search timeout/error:', err);
     }
     aiMsg.content = '';
   }
@@ -543,12 +547,17 @@ function updateSearchBtn() {
 
 async function webSearch(query) {
   try {
-    const keywords = await extractSearchKeywords(query);
-    if (!keywords) return null;
+    // 直接用用户问题作为搜索词（跳过 LLM 提取，避免额外延迟）
+    const keywords = query.slice(0, 100);
 
-    let results = await searchWithDuckDuckGo(keywords);
-    if (!results || results.length === 0) {
-      results = await searchWithSearXNG(keywords);
+    // 依次尝试多个搜索源
+    let results = null;
+    const searchFns = [searchWithSearXNG, searchWithDuckDuckGo];
+    for (const fn of searchFns) {
+      try {
+        results = await withTimeout(fn(keywords), 8000);
+        if (results && results.length > 0) break;
+      } catch { continue; }
     }
     if (!results || results.length === 0) return null;
 
@@ -570,68 +579,34 @@ async function webSearch(query) {
   }
 }
 
-async function extractSearchKeywords(query) {
-  try {
-    const resp = await fetch(`${config.baseURL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.defaultModel,
-        messages: [
-          { role: 'system', content: '你是一个搜索关键词提取器。用户会给你一个问题，你需要提取出最适合搜索引擎的关键词（英文或中文均可）。只输出关键词，不要输出其他内容。如果问题不需要搜索（比如纯数学计算、编程问题），输出 NOSEARCH。' },
-          { role: 'user', content: query }
-        ],
-        max_tokens: 50,
-        stream: false
-      })
-    });
-    if (!resp.ok) return query;
-    const data = await resp.json();
-    const kw = data.choices?.[0]?.message?.content?.trim();
-    if (!kw || kw === 'NOSEARCH') return null;
-    return kw;
-  } catch {
-    return query; // fallback: 直接用原始问题搜索
-  }
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
 }
 
-async function searchWithDuckDuckGo(query) {
-  try {
-    const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const results = [];
-    // Abstract
-    if (data.Abstract) {
-      results.push({ title: data.Heading || query, snippet: data.Abstract, url: data.AbstractURL || '' });
-    }
-    // Related topics
-    if (data.RelatedTopics) {
-      for (const topic of data.RelatedTopics) {
-        if (topic.Text && results.length < 8) {
-          results.push({ title: topic.Text.slice(0, 80), snippet: topic.Text, url: topic.FirstURL || '' });
-        }
-      }
-    }
-    return results.length > 0 ? results : null;
-  } catch { return null; }
+function corsProxy(url) {
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 }
 
 async function searchWithSearXNG(query) {
-  // 尝试多个公共 SearXNG 实例
   const instances = [
-    'https://search.bus-hit.me',
+    'https://searx.be',
+    'https://search.sapti.me',
     'https://searx.tiekoetter.com',
     'https://search.ononoki.org'
   ];
   for (const base of instances) {
     try {
-      const resp = await fetch(`${base}/search?q=${encodeURIComponent(query)}&format=json&categories=general&language=auto`, {
-        signal: AbortSignal.timeout(5000)
-      });
+      const url = `${base}/search?q=${encodeURIComponent(query)}&format=json&categories=general&language=auto`;
+      // 先直接请求，失败再走代理
+      let resp;
+      try {
+        resp = await withTimeout(fetch(url), 4000);
+      } catch {
+        resp = await withTimeout(fetch(corsProxy(url)), 5000);
+      }
       if (!resp.ok) continue;
       const data = await resp.json();
       if (data.results && data.results.length > 0) {
@@ -644,6 +619,32 @@ async function searchWithSearXNG(query) {
     } catch { continue; }
   }
   return null;
+}
+
+async function searchWithDuckDuckGo(query) {
+  try {
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    let resp;
+    try {
+      resp = await withTimeout(fetch(url), 4000);
+    } catch {
+      resp = await withTimeout(fetch(corsProxy(url)), 5000);
+    }
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const results = [];
+    if (data.Abstract) {
+      results.push({ title: data.Heading || query, snippet: data.Abstract, url: data.AbstractURL || '' });
+    }
+    if (data.RelatedTopics) {
+      for (const topic of data.RelatedTopics) {
+        if (topic.Text && results.length < 8) {
+          results.push({ title: topic.Text.slice(0, 80), snippet: topic.Text, url: topic.FirstURL || '' });
+        }
+      }
+    }
+    return results.length > 0 ? results : null;
+  } catch { return null; }
 }
 
 // --- Model Select ---
