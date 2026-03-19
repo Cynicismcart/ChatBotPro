@@ -255,15 +255,58 @@ function renderMessage(msg, index) {
     content += escapeHtml(msg.content);
   } else {
     content = marked.parse(msg.content || '');
+    // 将 [1] [2] 等转为可点击的引用标签
+    if (msg.sources && msg.sources.length > 0) {
+      content = content.replace(/\[(\d+)\]/g, (match, num) => {
+        const idx = parseInt(num);
+        const src = msg.sources.find(s => s.index === idx);
+        if (src && src.url) {
+          return `<a class="cite-badge" href="${escapeHtml(src.url)}" target="_blank" title="${escapeHtml(src.title)}">${num}</a>`;
+        }
+        return match;
+      });
+    }
   }
 
   const tokenHtml = msg.tokens ? `<div class="token-info">${msg.tokens} tokens</div>` : '';
   const streamClass = msg.streaming ? ' streaming-dot' : '';
 
+  // 来源卡片
+  let sourcesHtml = '';
+  if (!isUser && msg.sources && msg.sources.length > 0 && !msg.streaming) {
+    const cards = msg.sources.map(s => {
+      const domain = getDomain(s.url);
+      const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+      return `<a class="source-card" href="${escapeHtml(s.url)}" target="_blank">
+        <img class="source-favicon" src="${favicon}" alt="" onerror="this.style.display='none'">
+        <div class="source-info">
+          <div class="source-title">${escapeHtml(s.title.slice(0, 60))}</div>
+          <div class="source-domain">${escapeHtml(domain)}</div>
+        </div>
+        <span class="source-num">${s.index}</span>
+      </a>`;
+    }).join('');
+    sourcesHtml = `<div class="sources-section">
+      <button class="sources-toggle" onclick="this.parentElement.classList.toggle('expanded')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+        ${msg.sources.length} 个来源
+        <svg class="sources-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sources-list">${cards}</div>
+    </div>`;
+  }
+
   return `<div class="message ${msg.role}">
     <div class="avatar">${avatar}</div>
-    <div class="bubble${streamClass}">${content}${tokenHtml}</div>
+    <div class="bubble-wrap">
+      <div class="bubble${streamClass}">${content}${tokenHtml}</div>
+      ${sourcesHtml}
+    </div>
   </div>`;
+}
+
+function getDomain(url) {
+  try { return new URL(url).hostname.replace('www.', ''); } catch { return url; }
 }
 
 function scrollToBottom() {
@@ -308,7 +351,7 @@ async function handleSend() {
   clearImage();
 
   // Add assistant placeholder
-  const aiMsg = { role: 'assistant', content: '', streaming: true, tokens: 0 };
+  const aiMsg = { role: 'assistant', content: '', streaming: true, tokens: 0, sources: null };
   session.messages.push(aiMsg);
   session.updatedAt = Date.now();
   renderChat();
@@ -323,9 +366,10 @@ async function handleSend() {
   if (config.searchEnabled && text) {
     aiMsg.content = '正在搜索...';
     updateStreamingMessage(aiMsg);
-    const searchResults = await webSearch(text);
-    if (searchResults) {
-      searchContext = `\n\n以下是从互联网搜索到的相关信息，请基于这些信息回答用户的问题。如果搜索结果与问题无关，可以忽略。请在回答中标注信息来源。\n\n---搜索结果---\n${searchResults}\n---搜索结果结束---\n`;
+    const searchData = await webSearch(text);
+    if (searchData && searchData.formatted) {
+      searchContext = `\n\n以下是从互联网搜索到的相关信息，请基于这些信息回答用户的问题。请在回答中使用 [1]、[2] 等编号引用对应的搜索结果来源。如果搜索结果与问题无关，可以忽略。\n\n---搜索结果---\n${searchData.formatted}\n---搜索结果结束---\n`;
+      aiMsg.sources = searchData.sources;
     }
     aiMsg.content = '';
   }
@@ -499,23 +543,27 @@ function updateSearchBtn() {
 
 async function webSearch(query) {
   try {
-    // 用 LLM 提取搜索关键词
     const keywords = await extractSearchKeywords(query);
     if (!keywords) return null;
 
-    // 用多个搜索源尝试
     let results = await searchWithDuckDuckGo(keywords);
     if (!results || results.length === 0) {
       results = await searchWithSearXNG(keywords);
     }
     if (!results || results.length === 0) return null;
 
-    // 格式化搜索结果
-    const formatted = results.slice(0, config.searchCount).map((r, i) =>
-      `[${i + 1}] ${r.title}\n${r.snippet}\n来源: ${r.url}`
+    const sources = results.slice(0, config.searchCount).map((r, i) => ({
+      index: i + 1,
+      title: r.title || '',
+      snippet: r.snippet || '',
+      url: r.url || ''
+    }));
+
+    const formatted = sources.map(s =>
+      `[${s.index}] ${s.title}\n${s.snippet}\n来源: ${s.url}`
     ).join('\n\n');
 
-    return formatted;
+    return { formatted, sources };
   } catch (err) {
     console.error('Web search failed:', err);
     return null;
