@@ -1,48 +1,20 @@
 // ============================================================
-// Deep Research Engine v2 — 强制多步研究
+// Deep Research Engine v3 — Gemini 架构
+// 大纲 → 每议题多轮搜索 → 读取网页 → 汇总报告
 // ============================================================
 
 const researchState = {
   isRunning: false,
   abortController: null,
-  steps: [],
-  sources: [],
-  findings: [],
+  outline: [],      // [{topic, status, searches:[]}]
+  sources: [],      // 所有来源
+  findings: [],     // 每个议题的发现
+  steps: [],        // 面板步骤列表
   startTime: null,
-  plan: '',
   query: ''
 };
 window.researchState = researchState;
 
-// 强制AI先搜索再报告的 system prompt
-const DR_SYSTEM_PROMPT = `You are a deep research assistant. For every research request, you MUST follow these rules strictly:
-
-1. First output a plan (action=plan)
-2. Then perform AT LEAST 4 searches (action=search)
-3. After each search, read 1-2 relevant pages (action=read)
-4. Only output report (action=report) after you have at least 4 search results and 2 page reads
-5. NEVER skip straight to report
-
-Output ONLY a single JSON object each turn, no other text:
-
-{"action":"plan","topic":"...","steps":["step1","step2","step3","step4","step5"]}
-{"action":"search","query":"specific search terms"}
-{"action":"read","url":"https://..."}
-{"action":"report"}
-
-IMPORTANT: You must do multiple searches before reporting. If you have fewer than 4 searches done, keep searching.`;
-
-const DR_REPORT_SYSTEM_PROMPT = `你是专业研究报告撰写专家。根据提供的研究发现，撰写全面深入的研究报告。
-
-要求：
-- Markdown 格式，含标题/小节/列表
-- 内容全面，覆盖主题各重要方面
-- 在文中用 [1]、[2] 等编号引用来源（必须引用！）
-- 含结论和关键发现摘要
-- 至少 1000 字
-- 中文撰写`;
-
-// --- 启动研究 ---
 window.startDeepResearch = async function(query, opts) {
   const { config, onProgress, onReportDelta, onComplete, onError } = opts;
   if (researchState.isRunning) return;
@@ -50,133 +22,94 @@ window.startDeepResearch = async function(query, opts) {
   Object.assign(researchState, {
     isRunning: true,
     abortController: new AbortController(),
-    steps: [], sources: [], findings: [],
-    startTime: Date.now(), plan: '', query
+    outline: [], sources: [], findings: [], steps: [],
+    startTime: Date.now(), query
   });
 
-  addStep('plan', '制定研究计划', 'active');
-  onProgress();
-
   try {
-    // 1. 制定计划
-    const planAction = await callAction(
-      [{ role: 'user', content: `Research topic: ${query}\n\nStart by outputting a research plan.` }],
-      config
-    );
-    if (aborted()) throw new Error('aborted');
-
-    if (planAction?.action === 'plan') {
-      researchState.plan = (planAction.steps || []).join(' → ');
-      updateStep(0, 'done');
-    } else {
-      updateStep(0, 'done');
-    }
+    // ── 阶段1：生成研究大纲 ──
+    addStep('plan', '正在生成研究大纲...', 'active');
     onProgress();
 
-    // 2. 研究循环
-    const history = [
-      { role: 'user', content: `Research topic: ${query}` }
-    ];
-    let searchCount = 0;
-    let readCount = 0;
-    let rounds = 0;
-    const MAX_ROUNDS = 12;
+    const outline = await generateOutline(query, config);
+    if (aborted()) throw new Error('aborted');
+    researchState.outline = outline.map(t => ({ topic: t, status: 'pending', searches: [], findings: '' }));
+    updateStep(0, 'done', `研究大纲：${outline.length} 个议题`);
+    onProgress();
 
-    while (rounds < MAX_ROUNDS) {
+    // ── 阶段2：逐议题搜索 ──
+    for (let i = 0; i < researchState.outline.length; i++) {
       if (aborted()) throw new Error('aborted');
-      rounds++;
+      const item = researchState.outline[i];
+      item.status = 'active';
 
-      // 构建上下文
-      const ctxMsg = buildContext(researchState.findings, researchState.sources, searchCount, readCount);
-      const msgs = [...history, { role: 'user', content: ctxMsg }];
+      const topicStepIdx = addStep('search', `研究议题 ${i+1}/${researchState.outline.length}: ${item.topic}`, 'active');
+      onProgress();
 
-      const action = await callAction(msgs, config);
-      if (!action) { break; }
+      // 每个议题搜索 3-5 轮
+      const topicFindings = [];
+      const queries = await generateSearchQueries(query, item.topic, config);
+      if (aborted()) throw new Error('aborted');
 
-      if (action.action === 'report') {
-        // 强制最少搜索次数
-        if (searchCount < 3) {
-          // 忽略 report，强制继续搜索
-          history.push({ role: 'assistant', content: JSON.stringify(action) });
-          history.push({ role: 'user', content: `You only did ${searchCount} searches. You need at least 4. Keep searching for more information about: ${query}` });
-          continue;
-        }
-        break;
-      }
+      for (let q = 0; q < Math.min(queries.length, 5); q++) {
+        if (aborted()) throw new Error('aborted');
+        const sq = queries[q];
 
-      if (action.action === 'search' && action.query) {
-        const label = `搜索: "${action.query}"`;
-        const idx = addStep('search', label, 'active');
+        const searchIdx = addStep('search', `搜索: "${sq}"`, 'active');
         onProgress();
-        history.push({ role: 'assistant', content: JSON.stringify(action) });
 
-        try {
-          const results = await doSearch(action.query, config);
-          if (results.length > 0) {
-            results.forEach(r => {
-              if (!researchState.sources.find(s => s.url === r.url)) {
-                researchState.sources.push({
-                  index: researchState.sources.length + 1,
-                  title: r.title || r.url,
-                  url: r.url,
-                  snippet: r.snippet || ''
-                });
-              }
+        const results = await doSearch(sq, config);
+        results.forEach(r => {
+          if (!researchState.sources.find(s => s.url === r.url)) {
+            researchState.sources.push({
+              index: researchState.sources.length + 1,
+              title: r.title || r.url,
+              url: r.url,
+              snippet: r.snippet || '',
+              topic: item.topic
             });
-            const summary = results.slice(0, 5).map((r, i) => {
+          }
+        });
+        topicFindings.push(...results.map(r => `${r.title}: ${r.snippet}`));
+        updateStep(searchIdx, 'done');
+        onProgress();
+
+        // 读取最相关的1-2个网页
+        if (results.length > 0 && config.searchWorkerURL) {
+          const toRead = results.slice(0, 2);
+          for (const r of toRead) {
+            if (aborted()) break;
+            const readIdx = addStep('read', `阅读: ${getDR(r.url)}`, 'active');
+            onProgress();
+            const page = await readPage(r.url, config);
+            if (page.content && !page.error) {
+              topicFindings.push(`[来自${getDR(r.url)}] ${page.content.slice(0, 1500)}`);
               const src = researchState.sources.find(s => s.url === r.url);
-              return `[${src?.index || i+1}] ${r.title}\n${r.snippet}\nURL: ${r.url}`;
-            }).join('\n\n');
-            researchState.findings.push(`Search "${action.query}":\n${summary}`);
-            history.push({ role: 'user', content: `Search results for "${action.query}":\n${summary}\n\nNow read the most relevant page or search for more information.` });
-            searchCount++;
-          } else {
-            history.push({ role: 'user', content: 'No results found. Try different search terms.' });
+              if (src && page.title) src.title = page.title;
+            }
+            updateStep(readIdx, 'done');
+            onProgress();
           }
-          updateStep(idx, 'done');
-        } catch(e) {
-          updateStep(idx, 'error');
-          history.push({ role: 'user', content: `Search failed: ${e.message}` });
         }
-        onProgress();
-
-      } else if (action.action === 'read' && action.url) {
-        const domain = getDR(action.url);
-        const idx = addStep('read', `阅读: ${domain}`, 'active');
-        onProgress();
-        history.push({ role: 'assistant', content: JSON.stringify(action) });
-
-        try {
-          const page = await readPage(action.url, config);
-          if (page.content && !page.error) {
-            const text = page.content.slice(0, 3000);
-            researchState.findings.push(`Page "${page.title || domain}":\n${text}`);
-            history.push({ role: 'user', content: `Page content from ${domain}:\n${text}\n\nContinue researching.` });
-            const src = researchState.sources.find(s => s.url === action.url);
-            if (src && page.title) src.title = page.title;
-            readCount++;
-          } else {
-            history.push({ role: 'user', content: `Could not read page: ${page.error || 'unknown error'}` });
-          }
-          updateStep(idx, 'done');
-        } catch(e) {
-          updateStep(idx, 'error');
-          history.push({ role: 'user', content: `Read failed: ${e.message}` });
-        }
-        onProgress();
       }
+
+      item.findings = topicFindings.join('\n\n');
+      item.status = 'done';
+      researchState.findings.push({ topic: item.topic, content: item.findings });
+      updateStep(topicStepIdx, 'done', `完成: ${item.topic}`);
+      onProgress();
     }
 
     if (aborted()) throw new Error('aborted');
 
-    // 3. 生成报告
-    const rptIdx = addStep('report', '生成研究报告', 'active');
+    // ── 阶段3：生成报告 ──
+    const rptIdx = addStep('report', '正在撰写研究报告...', 'active');
     onProgress();
 
     const reportMsgs = buildReportMessages(query, researchState.findings, researchState.sources);
     await streamReport(reportMsgs, config, onReportDelta, researchState.abortController.signal);
 
-    updateStep(rptIdx, 'done');
+    updateStep(rptIdx, 'done', '研究报告已生成');
     researchState.isRunning = false;
     onComplete(researchState.sources);
 
@@ -193,9 +126,7 @@ window.abortDeepResearch = function() {
   }
 };
 
-function aborted() {
-  return researchState.abortController?.signal.aborted;
-}
+function aborted() { return researchState.abortController?.signal.aborted; }
 
 function addStep(type, label, status) {
   const idx = researchState.steps.length;
@@ -203,35 +134,52 @@ function addStep(type, label, status) {
   return idx;
 }
 
-function updateStep(idx, status) {
-  if (researchState.steps[idx]) researchState.steps[idx].status = status;
+function updateStep(idx, status, label) {
+  if (!researchState.steps[idx]) return;
+  researchState.steps[idx].status = status;
+  if (label) researchState.steps[idx].label = label;
 }
 
-// --- LLM 调用（非流式）---
-async function callAction(messages, config) {
+// 生成研究大纲
+async function generateOutline(query, config) {
+  const resp = await llmJSON([
+    { role: 'system', content: '你是研究规划专家。将用户的研究主题分解为5-7个具体的子议题，每个议题是一个独立的研究方向。只输出JSON数组，不要其他文字。' },
+    { role: 'user', content: `研究主题：${query}\n\n输出格式：["议题1","议题2","议题3",...]` }
+  ], config, 512);
+  if (Array.isArray(resp)) return resp.slice(0, 7);
+  // fallback
+  return [query + ' 概述', query + ' 现状', query + ' 发展趋势', query + ' 影响因素', query + ' 未来展望'];
+}
+
+// 为每个议题生成搜索词
+async function generateSearchQueries(mainQuery, topic, config) {
+  const resp = await llmJSON([
+    { role: 'system', content: '生成搜索词。只输出JSON字符串数组，不要其他文字。' },
+    { role: 'user', content: `主题：${mainQuery}\n议题：${topic}\n\n生成3-4个不同角度的搜索词，输出格式：["搜索词1","搜索词2","搜索词3"]` }
+  ], config, 256);
+  if (Array.isArray(resp)) return resp.slice(0, 4);
+  return [topic, `${mainQuery} ${topic}`];
+}
+
+// 通用 LLM 调用返回 JSON
+async function llmJSON(messages, config, maxTokens) {
   try {
     const resp = await fetch(`${config.baseURL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
-      body: JSON.stringify({
-        model: config.defaultModel,
-        messages: [{ role: 'system', content: DR_SYSTEM_PROMPT }, ...messages],
-        max_tokens: 256,
-        temperature: 0.2,
-        stream: false
-      }),
+      body: JSON.stringify({ model: config.defaultModel, messages, max_tokens: maxTokens, temperature: 0.3, stream: false }),
       signal: researchState.abortController?.signal
     });
     if (!resp.ok) return null;
     const data = await resp.json();
     const text = (data.choices?.[0]?.message?.content || '').trim();
-    const m = text.match(/\{[\s\S]*?\}/);
+    const m = text.match(/\[[\s\S]*\]/);
     if (m) return JSON.parse(m[0]);
   } catch(e) {}
   return null;
 }
 
-// --- 流式报告生成 ---
+// 流式报告
 async function streamReport(messages, config, onDelta, signal) {
   const resp = await fetch(`${config.baseURL}/v1/chat/completions`, {
     method: 'POST',
@@ -252,16 +200,12 @@ async function streamReport(messages, config, onDelta, signal) {
       if (!line.startsWith('data: ')) continue;
       const raw = line.slice(6).trim();
       if (raw === '[DONE]') return;
-      try {
-        const d = JSON.parse(raw);
-        const delta = d.choices?.[0]?.delta?.content;
-        if (delta) onDelta(delta);
-      } catch(e) {}
+      try { const d = JSON.parse(raw); const delta = d.choices?.[0]?.delta?.content; if (delta) onDelta(delta); } catch(e) {}
     }
   }
 }
 
-// --- 搜索 ---
+// 搜索
 async function doSearch(query, config) {
   if (config.searchWorkerURL) {
     try {
@@ -269,7 +213,7 @@ async function doSearch(query, config) {
         fetch(`${config.searchWorkerURL}?q=${encodeURIComponent(query)}&count=6`),
         new Promise((_,r) => setTimeout(() => r(new Error('timeout')), 12000))
       ]);
-      if (resp.ok) { const d = await resp.json(); if (d.results) return d.results; }
+      if (resp.ok) { const d = await resp.json(); if (d.results?.length) return d.results; }
     } catch(e) {}
   }
   if (config.tavilyKey) {
@@ -288,9 +232,9 @@ async function doSearch(query, config) {
   return [];
 }
 
-// --- 读取网页 ---
+// 读取网页
 async function readPage(url, config) {
-  if (!config.searchWorkerURL) return { error: '未配置Worker' };
+  if (!config.searchWorkerURL) return { error: 'no worker' };
   try {
     const resp = await Promise.race([
       fetch(`${config.searchWorkerURL}?read=${encodeURIComponent(url)}`),
@@ -301,25 +245,26 @@ async function readPage(url, config) {
   } catch(e) { return { error: e.message }; }
 }
 
-// --- 上下文构建 ---
-function buildContext(findings, sources, searchCount, readCount) {
-  const status = `Progress: ${searchCount} searches done, ${readCount} pages read.`;
-  if (findings.length === 0) return `${status}\n\nStart researching now. Do the first search.`;
-  const recent = findings.slice(-3).join('\n\n---\n\n');
-  const remaining = Math.max(0, 4 - searchCount);
-  const hint = remaining > 0
-    ? `You still need ${remaining} more searches before you can write the report.`
-    : 'You have enough data. You can now output {"action":"report"} or continue for more depth.';
-  return `${status}\n${hint}\n\nRecent findings:\n${recent}\n\nWhat is your next action?`;
-}
-
-// --- 报告消息 ---
+// 构建报告消息
 function buildReportMessages(query, findings, sources) {
-  const srcList = sources.map(s => `[${s.index}] ${s.title}\n来源: ${s.url}\n摘要: ${s.snippet}`).join('\n\n');
-  const findingsText = findings.join('\n\n---\n\n');
+  const findingsText = findings.map((f, i) =>
+    `## 议题${i+1}: ${f.topic}\n${f.content}`
+  ).join('\n\n---\n\n');
+
+  const srcList = sources.map(s =>
+    `[${s.index}] ${s.title}\nURL: ${s.url}\n摘要: ${s.snippet}`
+  ).join('\n\n');
+
   return [
-    { role: 'system', content: DR_REPORT_SYSTEM_PROMPT },
-    { role: 'user', content: `研究主题：${query}\n\n研究发现：\n${findingsText}\n\n来源列表：\n${srcList}\n\n请撰写完整研究报告，必须在适当位置标注 [数字] 引用。` }
+    { role: 'system', content: `你是专业研究报告撰写专家。根据提供的各议题研究发现，撰写全面深入的研究报告。
+要求：
+- Markdown 格式，含标题/小节/列表
+- 内容全面，覆盖所有议题
+- 必须在文中用 [数字] 引用来源
+- 含执行摘要和结论
+- 至少 1200 字
+- 中文撰写` },
+    { role: 'user', content: `研究主题：${query}\n\n各议题研究发现：\n${findingsText}\n\n来源列表：\n${srcList}\n\n请撰写完整研究报告。` }
   ];
 }
 

@@ -403,25 +403,33 @@ function updateDRPanel() {
   // 进度条
   const total = state.steps.length || 1;
   const done = state.steps.filter(s => s.status === 'done').length;
-  const pct = Math.max(5, Math.round((done / total) * 100));
+  const pct = Math.max(5, Math.min(95, Math.round((done / total) * 100)));
   const fill = document.getElementById('dr-progress-fill');
   if (fill) {
-    fill.style.width = pct + '%';
+    fill.style.width = (state.isRunning ? pct : 100) + '%';
     if (state.isRunning) fill.classList.add('running');
     else fill.classList.remove('running');
   }
 
-  // 研究计划
-  if (state.plan) {
+  // 大纲议题列表
+  if (state.outline && state.outline.length > 0) {
     const planSec = document.getElementById('dr-plan-section');
     const planText = document.getElementById('dr-plan-text');
     if (planSec) planSec.style.display = 'block';
-    if (planText) planText.textContent = state.plan;
+    if (planText) {
+      planText.innerHTML = state.outline.map(item => {
+        const icon = item.status === 'done' ? '✓' : item.status === 'active' ? '▶' : '○';
+        return `<div class="dr-outline-item ${item.status||'pending'}">
+          <span class="dr-outline-icon">${icon}</span>
+          <span>${escapeHtml(item.topic)}</span>
+        </div>`;
+      }).join('');
+    }
   }
 
   // 步骤计数
   const stepCount = document.getElementById('dr-step-count');
-  if (stepCount) stepCount.textContent = `${state.steps.filter(s=>s.status==='done').length}/${state.steps.length}`;
+  if (stepCount) stepCount.textContent = `${done}/${total}`;
 
   // 步骤列表
   const stepsList = document.getElementById('dr-steps-list');
@@ -439,9 +447,10 @@ function updateDRPanel() {
         </div>
       </div>`;
     }).join('');
+    stepsList.scrollTop = stepsList.scrollHeight;
   }
 
-  // 来源
+  // 来源卡片（搜索结果风格）
   const sourceCount = state.sources.length;
   if (sourceCount > 0) {
     const srcPanel = document.getElementById('dr-sources-panel');
@@ -453,9 +462,14 @@ function updateDRPanel() {
       srcChips.innerHTML = state.sources.map(s => {
         const domain = getDomain(s.url);
         const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
-        return `<a class="dr-chip" href="${escapeHtml(s.url)}" target="_blank">
-          <img src="${favicon}" alt="" onerror="this.style.display='none'">
-          <span>${escapeHtml(domain)}</span>
+        return `<a class="dr-source-card" href="${escapeHtml(s.url)}" target="_blank">
+          <div class="dr-source-card-top">
+            <img src="${favicon}" alt="" onerror="this.style.display='none'">
+            <span class="dr-source-domain">${escapeHtml(domain)}</span>
+            <span class="dr-source-num">[${s.index}]</span>
+          </div>
+          <div class="dr-source-title">${escapeHtml((s.title||'').slice(0,80))}</div>
+          <div class="dr-source-snippet">${escapeHtml((s.snippet||'').slice(0,120))}</div>
         </a>`;
       }).join('');
     }
