@@ -11,6 +11,11 @@ export default {
 
     const url = new URL(request.url);
 
+    // API 代理端点: /v1/*
+    if (url.pathname.startsWith('/v1/')) {
+      return proxyAPI(request, url);
+    }
+
     // 网页阅读端点: ?read=URL
     const readUrl = url.searchParams.get('read');
     if (readUrl) {
@@ -38,6 +43,146 @@ export default {
     }
   }
 };
+
+const API_TARGET = 'https://api.tech2026.edu.kg';
+
+async function proxyAPI(request, url) {
+  const pathname = url.pathname;
+  const authHeader = request.headers.get('Authorization') || '';
+  const apiKey = authHeader.replace('Bearer ', '');
+
+  // /v1/models — 转发原生 models 端点
+  if (pathname === '/v1/models') {
+    const resp = await fetch(API_TARGET + '/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+    });
+    const data = await resp.json();
+    // 转换为 OpenAI 格式（data 数组里加 object 字段）
+    if (data.data) {
+      data.data = data.data.map(m => Object.assign({ object: 'model' }, m));
+    }
+    return json(data);
+  }
+
+  // /v1/chat/completions — OpenAI 格式转 Anthropic 格式
+  if (pathname === '/v1/chat/completions') {
+    const body = await request.json();
+    const isStream = !!body.stream;
+
+    // 提取 system prompt
+    const systemMsgs = body.messages.filter(m => m.role === 'system');
+    const chatMsgs = body.messages.filter(m => m.role !== 'system');
+    const systemText = systemMsgs.map(m => m.content).join('\n');
+
+    // 构建 Anthropic 格式请求
+    const anthropicBody = {
+      model: body.model || 'claude-opus-4-6',
+      max_tokens: body.max_tokens || 4096,
+      messages: chatMsgs.map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content :
+          Array.isArray(m.content) ? m.content.map(c =>
+            c.type === 'image_url'
+              ? { type: 'image', source: { type: 'url', url: c.image_url.url } }
+              : { type: 'text', text: c.text || '' }
+          ) : String(m.content)
+      })),
+      stream: isStream
+    };
+    if (systemText) anthropicBody.system = systemText;
+    if (body.temperature !== undefined) anthropicBody.temperature = body.temperature;
+
+    const upstreamResp = await fetch(API_TARGET + '/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(anthropicBody)
+    });
+
+    if (!upstreamResp.ok) {
+      const err = await upstreamResp.text();
+      return new Response(err, { status: upstreamResp.status, headers: corsHeaders() });
+    }
+
+    // 流式响应：转换 Anthropic SSE → OpenAI SSE
+    if (isStream) {
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const reader = upstreamResp.body.getReader();
+
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const raw = line.slice(6).trim();
+              if (raw === '[DONE]') { await writer.write(encoder.encode('data: [DONE]\n\n')); continue; }
+              try {
+                const evt = JSON.parse(raw);
+                let delta = '';
+                if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+                  delta = evt.delta.text || '';
+                }
+                if (delta) {
+                  const chunk = { id: 'chatcmpl-1', object: 'chat.completion.chunk', model: body.model,
+                    choices: [{ index: 0, delta: { content: delta }, finish_reason: null }] };
+                  await writer.write(encoder.encode('data: ' + JSON.stringify(chunk) + '\n\n'));
+                }
+                if (evt.type === 'message_stop') {
+                  const done_chunk = { id: 'chatcmpl-1', object: 'chat.completion.chunk', model: body.model,
+                    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+                  await writer.write(encoder.encode('data: ' + JSON.stringify(done_chunk) + '\n\n'));
+                  await writer.write(encoder.encode('data: [DONE]\n\n'));
+                }
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+        await writer.close();
+      })();
+
+      const h = Object.assign({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' }, corsHeaders());
+      return new Response(readable, { status: 200, headers: h });
+    }
+
+    // 非流式：转换 Anthropic 响应 → OpenAI 格式
+    const data = await upstreamResp.json();
+    const text = data.content?.[0]?.text || '';
+    const openaiResp = {
+      id: data.id || 'chatcmpl-1',
+      object: 'chat.completion',
+      model: data.model || body.model,
+      choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: data.stop_reason || 'stop' }],
+      usage: { prompt_tokens: data.usage?.input_tokens || 0, completion_tokens: data.usage?.output_tokens || 0,
+        total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) }
+    };
+    return json(openaiResp);
+  }
+
+  // 其他 /v1/ 路径直接透传
+  const headers = new Headers();
+  for (const [k, v] of request.headers.entries()) {
+    if (['authorization','content-type','x-api-key','anthropic-version'].includes(k.toLowerCase())) headers.set(k, v);
+  }
+  const upResp = await fetch(API_TARGET + pathname + url.search, {
+    method: request.method, headers,
+    body: request.method !== 'GET' ? request.body : undefined
+  });
+  const respHeaders = new Headers(upResp.headers);
+  for (const [k, v] of Object.entries(corsHeaders())) respHeaders.set(k, v);
+  return new Response(upResp.body, { status: upResp.status, headers: respHeaders });
+}
 
 async function searchDuckDuckGo(query, count) {
   const resp = await fetch('https://html.duckduckgo.com/html/', {
@@ -144,8 +289,8 @@ function stripTags(html) {
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, anthropic-version',
     'Access-Control-Max-Age': '86400'
   };
 }
