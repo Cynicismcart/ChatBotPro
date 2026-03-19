@@ -141,6 +141,9 @@ function bindEvents() {
 
   // Deep research
   $('btn-deep-research').onclick = handleDeepResearch;
+  $('dr-stop-btn').onclick = () => { window.abortDeepResearch && window.abortDeepResearch(); };
+  $('dr-close-btn').onclick = closeDRPanel;
+  $('dr-overlay').onclick = closeDRPanel;
 
   // Provider管理
   $('btn-add-provider').onclick = addProvider;
@@ -268,8 +271,9 @@ function renderMessage(msg, index) {
     if (msg.image) content += `<img src="${msg.image}" alt="图片">`;
     content += escapeHtml(msg.content);
   } else if (msg.deepResearch && msg.streaming) {
-    content = renderDeepResearchPanel(msg);
-    if (msg.content) content += `<div class="dr-report-streaming">${marked.parse(msg.content)}</div>`;
+    content = msg.content
+      ? `<div class="dr-report-streaming">${marked.parse(msg.content)}</div>`
+      : `<div class="dr-summary-bar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>正在深度研究中...</div>`;
   } else {
     content = marked.parse(msg.content || '');
     // 将 [1] [2] 等转为可点击的引用标签
@@ -341,54 +345,84 @@ function updateTokenCount() {
   }
 }
 
-// --- Deep Research ---
-function renderDeepResearchPanel(aiMsg) {
+// --- Deep Research 侧边面板 ---
+function openDRPanel() {
+  document.getElementById('dr-panel').classList.add('open');
+  document.getElementById('dr-overlay').style.display = 'block';
+}
+
+function closeDRPanel() {
+  document.getElementById('dr-panel').classList.remove('open');
+  document.getElementById('dr-overlay').style.display = 'none';
+}
+
+function updateDRPanel() {
   const state = window.researchState;
+  if (!state) return;
+
+  // 计时器
   const elapsed = state.startTime ? Math.floor((Date.now() - state.startTime) / 1000) : 0;
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
+  const timerEl = document.getElementById('dr-timer');
+  if (timerEl) timerEl.textContent = `${mm}:${ss}`;
 
-  const totalSteps = state.steps.length;
-  const doneSteps = state.steps.filter(s => s.status === 'done').length;
-  const pct = totalSteps > 0 ? Math.round((doneSteps / Math.max(totalSteps, 1)) * 100) : 5;
-
-  const stepsHtml = state.steps.map(step => {
-    const iconMap = { done: '✓', active: '•', error: '✕', pending: '○' };
-    const icon = iconMap[step.status] || '○';
-    return `<div class="dr-step ${step.status}">
-      <div class="dr-step-icon">${icon}</div>
-      <div class="dr-step-label">${escapeHtml(step.label)}</div>
-    </div>`;
-  }).join('');
-
-  let sourcesHtml = '';
-  if (state.sources.length > 0) {
-    const chips = state.sources.map(s => {
-      const domain = getDomain(s.url);
-      const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
-      return `<a class="dr-source-chip" href="${escapeHtml(s.url)}" target="_blank">
-        <img src="${favicon}" alt="" onerror="this.style.display='none'">
-        <span>${escapeHtml(domain)}</span>
-      </a>`;
-    }).join('');
-    sourcesHtml = `<div class="dr-sources-section">
-      <div class="dr-sources-title">已收集 ${state.sources.length} 个来源</div>
-      <div class="dr-sources-grid">${chips}</div>
-    </div>`;
+  // 进度条
+  const total = state.steps.length || 1;
+  const done = state.steps.filter(s => s.status === 'done').length;
+  const pct = Math.max(5, Math.round((done / total) * 100));
+  const fill = document.getElementById('dr-progress-fill');
+  if (fill) {
+    fill.style.width = pct + '%';
+    if (state.isRunning) fill.classList.add('running');
+    else fill.classList.remove('running');
   }
 
-  return `<div class="deep-research-panel">
-    <div class="dr-header">
-      <div class="dr-title">
-        <div class="dr-title-icon">🔬</div>
-        深度研究中
-      </div>
-      <div class="dr-timer">${mm}:${ss}</div>
-    </div>
-    <div class="dr-progress-bar"><div class="dr-progress-fill" style="width:${pct}%"></div></div>
-    <div class="dr-steps">${stepsHtml}</div>
-    ${sourcesHtml}
-  </div>`;
+  // 研究计划
+  if (state.plan) {
+    const planSec = document.getElementById('dr-plan-section');
+    const planText = document.getElementById('dr-plan-text');
+    if (planSec) planSec.style.display = 'block';
+    if (planText) planText.textContent = state.plan;
+  }
+
+  // 步骤列表
+  const stepsList = document.getElementById('dr-steps-list');
+  if (stepsList) {
+    const typeLabel = { plan: '计划', search: '搜索', read: '阅读', report: '报告' };
+    const iconMap = { done: '✓', active: '▶', error: '✕', pending: '·' };
+    stepsList.innerHTML = state.steps.map(step => {
+      const tLabel = typeLabel[step.type] || step.type;
+      const icon = iconMap[step.status] || '·';
+      return `<div class="dr-step-item ${step.status}">
+        <div class="dr-step-dot">${icon}</div>
+        <div class="dr-step-content">
+          <div class="dr-step-type">${tLabel}</div>
+          <div class="dr-step-text">${escapeHtml(step.label)}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // 来源
+  const sourceCount = state.sources.length;
+  if (sourceCount > 0) {
+    const srcPanel = document.getElementById('dr-sources-panel');
+    const srcCount = document.getElementById('dr-source-count');
+    const srcChips = document.getElementById('dr-sources-chips');
+    if (srcPanel) srcPanel.style.display = 'block';
+    if (srcCount) srcCount.textContent = sourceCount;
+    if (srcChips) {
+      srcChips.innerHTML = state.sources.map(s => {
+        const domain = getDomain(s.url);
+        const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+        return `<a class="dr-chip" href="${escapeHtml(s.url)}" target="_blank">
+          <img src="${favicon}" alt="" onerror="this.style.display='none'">
+          <span>${escapeHtml(domain)}</span>
+        </a>`;
+      }).join('');
+    }
+  }
 }
 
 async function handleDeepResearch() {
@@ -413,6 +447,7 @@ async function handleDeepResearch() {
   input.value = ''; input.style.height = 'auto';
   clearImage();
 
+  // AI 消息占位（聊天里显示进度摘要）
   const aiMsg = { role: 'assistant', content: '', streaming: true, tokens: 0, sources: null, deepResearch: true };
   session.messages.push(aiMsg);
   session.updatedAt = Date.now();
@@ -420,26 +455,37 @@ async function handleDeepResearch() {
   renderChat();
   setStreamingUI(true);
 
-  // 启动计时器刷新进度面板
+  // 打开侧边面板
+  openDRPanel();
+
+  // 重置面板状态
+  const planSec = document.getElementById('dr-plan-section');
+  if (planSec) planSec.style.display = 'none';
+  const srcPanel = document.getElementById('dr-sources-panel');
+  if (srcPanel) srcPanel.style.display = 'none';
+  const stepsList = document.getElementById('dr-steps-list');
+  if (stepsList) stepsList.innerHTML = '';
+  const fill = document.getElementById('dr-progress-fill');
+  if (fill) { fill.style.width = '5%'; fill.classList.add('running'); }
+
+  // 计时器
   const timerInterval = setInterval(() => {
     if (!window.researchState.isRunning) { clearInterval(timerInterval); return; }
-    updateDeepResearchPanel(aiMsg);
+    updateDRPanel();
   }, 1000);
 
   await window.startDeepResearch(text, {
-    config,
-    session,
-    aiMsg,
-    onProgress: () => updateDeepResearchPanel(aiMsg),
+    config, session, aiMsg,
+    onProgress: () => updateDRPanel(),
     onReportDelta: (delta) => {
       aiMsg.content += delta;
-      // 流式更新报告区
+      // 流式更新聊天气泡里的报告
       const msgs = document.getElementById('messages');
       const lastBubble = msgs.querySelector('.message.assistant:last-child .bubble');
       if (lastBubble) {
-        const panel = lastBubble.querySelector('.deep-research-panel');
         let reportEl = lastBubble.querySelector('.dr-report-streaming');
         if (!reportEl) {
+          lastBubble.innerHTML = '';
           reportEl = document.createElement('div');
           reportEl.className = 'dr-report-streaming';
           lastBubble.appendChild(reportEl);
@@ -453,6 +499,13 @@ async function handleDeepResearch() {
       aiMsg.sources = sources;
       aiMsg.streaming = false;
       aiMsg.deepResearch = false;
+      // 进度条到100%
+      const fill = document.getElementById('dr-progress-fill');
+      if (fill) { fill.style.width = '100%'; fill.classList.remove('running'); }
+      updateDRPanel();
+      // 关闭停止按钮，面板留着让用户查看
+      const stopBtn = document.getElementById('dr-stop-btn');
+      if (stopBtn) stopBtn.style.display = 'none';
       setStreamingUI(false);
       saveSessions();
       renderChat();
@@ -468,31 +521,6 @@ async function handleDeepResearch() {
       renderChat();
     }
   });
-}
-
-function updateDeepResearchPanel(aiMsg) {
-  const msgs = document.getElementById('messages');
-  const lastBubble = msgs.querySelector('.message.assistant:last-child .bubble');
-  if (!lastBubble) return;
-  const panel = lastBubble.querySelector('.deep-research-panel');
-  const newPanelHtml = renderDeepResearchPanel(aiMsg);
-  if (panel) {
-    panel.outerHTML = newPanelHtml;
-  } else {
-    lastBubble.innerHTML = newPanelHtml;
-  }
-  // 重新追加正在流式输出的报告
-  if (aiMsg.content) {
-    const bubble = lastBubble.closest ? lastBubble : msgs.querySelector('.message.assistant:last-child .bubble');
-    let reportEl = bubble.querySelector('.dr-report-streaming');
-    if (!reportEl) {
-      reportEl = document.createElement('div');
-      reportEl.className = 'dr-report-streaming';
-      bubble.appendChild(reportEl);
-    }
-    reportEl.innerHTML = marked.parse(aiMsg.content);
-  }
-  scrollToBottom();
 }
 
 // --- Send Message ---

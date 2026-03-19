@@ -83,6 +83,41 @@
     </div>
   </div>
 
+  <!-- 深度研究面板 -->
+  <div id="dr-panel" class="dr-panel">
+    <div class="dr-panel-header">
+      <div class="dr-panel-title">
+        <div class="dr-panel-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <span>深度研究</span>
+      </div>
+      <div class="dr-panel-meta">
+        <span id="dr-timer" class="dr-timer-text">00:00</span>
+        <button id="dr-stop-btn" class="dr-stop-btn" title="停止研究">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </button>
+        <button id="dr-close-btn" class="dr-close-btn" title="关闭面板">✕</button>
+      </div>
+    </div>
+    <div class="dr-panel-progress">
+      <div class="dr-panel-progress-fill" id="dr-progress-fill"></div>
+    </div>
+    <div class="dr-panel-body">
+      <div id="dr-plan-section" class="dr-plan-section" style="display:none">
+        <div class="dr-section-label">研究计划</div>
+        <div id="dr-plan-text" class="dr-plan-text"></div>
+      </div>
+      <div class="dr-section-label" style="margin-top:12px">研究步骤</div>
+      <div id="dr-steps-list" class="dr-steps-list"></div>
+      <div id="dr-sources-panel" class="dr-sources-panel" style="display:none">
+        <div class="dr-section-label">已收集来源 <span id="dr-source-count">0</span></div>
+        <div id="dr-sources-chips" class="dr-sources-chips"></div>
+      </div>
+    </div>
+  </div>
+  <div id="dr-overlay" class="dr-overlay" style="display:none"></div>
+
   <!-- 设置弹窗 -->
   <div id="settings-modal" class="modal" style="display:none">
     <div class="modal-content">
