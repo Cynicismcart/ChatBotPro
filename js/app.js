@@ -479,23 +479,42 @@ function updateModelSelect() {
 }
 
 async function fetchModels() {
+  // 先从输入框读取最新值（用户可能还没点保存）
+  const urlInput = document.getElementById('cfg-url');
+  const keyInput = document.getElementById('cfg-key');
+  const baseURL = urlInput ? urlInput.value.replace(/\/+$/, '') : config.baseURL;
+  const apiKey = keyInput ? keyInput.value : config.apiKey;
+
+  if (!baseURL || !apiKey) {
+    alert('请先填写 API Base URL 和 API Key');
+    return;
+  }
+
   const btn = document.getElementById('btn-fetch-models');
   if (btn) btn.textContent = '加载中...';
   try {
-    const resp = await fetch(`${config.baseURL}/v1/models`, {
-      headers: { 'Authorization': `Bearer ${config.apiKey}` }
+    const resp = await fetch(`${baseURL}/v1/models`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
     });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    if (data.data) {
+    if (data.data && data.data.length) {
+      config.baseURL = baseURL;
+      config.apiKey = apiKey;
       config.models = data.data.map(m => m.id).sort();
       if (!config.models.includes(config.defaultModel) && config.models.length) {
         config.defaultModel = config.models[0];
       }
       saveConfig();
       renderModelSelect();
+      if (btn) btn.textContent = `已加载 ${config.models.length} 个模型`;
+      setTimeout(() => { if (btn) btn.textContent = '刷新模型列表'; }, 2000);
+      return;
     }
+    throw new Error('返回数据为空');
   } catch (err) {
     console.error('Fetch models failed:', err);
+    alert('拉取模型失败: ' + err.message);
   }
   if (btn) btn.textContent = '刷新模型列表';
 }
