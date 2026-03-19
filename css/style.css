@@ -702,6 +702,105 @@ body {
   z-index: 9;
 }
 
+/* Provider Selector */
+.provider-select {
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--bg2);
+  color: var(--text1);
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 120px;
+}
+
+.provider-select:focus { outline: none; border-color: var(--accent); }
+
+.providers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.provider-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: var(--bg3);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  gap: 10px;
+}
+
+.provider-item.active {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.provider-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.provider-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.provider-item-url {
+  font-size: 11px;
+  color: var(--text3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.provider-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.provider-use-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.provider-del-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text3);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.provider-del-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+.provider-add-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.provider-add-row input {
+  min-width: 80px;
+}
+
 /* ============================================================
    Deep Research UI
    ============================================================ */

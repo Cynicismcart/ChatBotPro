@@ -13,7 +13,9 @@ const DEFAULT_CONFIG = {
   searchEnabled: false,
   searchCount: 5,
   tavilyKey: '',
-  searchWorkerURL: ''
+  searchWorkerURL: '',
+  providers: [],        // [{name, baseURL, apiKey, models, defaultModel}]
+  currentProvider: -1  // -1 = 使用手动配置，>=0 = providers 数组索引
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -31,6 +33,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupMarked();
   bindEvents();
   renderSessionList();
+  renderProviderSelect();
+  applyCurrentProvider();
 
   // 首次使用：未配置 API 时自动弹出设置
   if (!config.baseURL || !config.apiKey) {
@@ -136,6 +140,10 @@ function bindEvents() {
 
   // Deep research
   $('btn-deep-research').onclick = handleDeepResearch;
+
+  // Provider管理
+  $('btn-add-provider').onclick = addProvider;
+  $('provider-select').onchange = switchProvider;
 
   // Image
   $('image-input').onchange = handleImageSelect;
@@ -878,6 +886,118 @@ async function fetchModels() {
 }
 
 // --- Settings ---
+// --- Provider Management ---
+function renderProviderSelect() {
+  const sel = document.getElementById('provider-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="-1">手动配置</option>';
+  (config.providers || []).forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = p.name || `服务商${i+1}`;
+    sel.appendChild(opt);
+  });
+  sel.value = config.currentProvider ?? -1;
+}
+
+function renderProvidersList() {
+  const box = document.getElementById('cfg-providers');
+  if (!box) return;
+  if (!config.providers || config.providers.length === 0) {
+    box.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:6px 0">暂无服务商，在下方添加</div>';
+    return;
+  }
+  box.innerHTML = config.providers.map((p, i) => `
+    <div class="provider-item${config.currentProvider === i ? ' active' : ''}">
+      <div class="provider-item-info">
+        <span class="provider-item-name">${escapeHtml(p.name)}</span>
+        <span class="provider-item-url">${escapeHtml(p.baseURL)}</span>
+      </div>
+      <div class="provider-item-actions">
+        <button class="provider-use-btn" onclick="useProvider(${i})">${config.currentProvider === i ? '使用中' : '切换'}</button>
+        <button class="provider-del-btn" onclick="deleteProvider(${i})">删除</button>
+      </div>
+    </div>`).join('');
+}
+
+function addProvider() {
+  const name = document.getElementById('cfg-prov-name').value.trim();
+  const url = document.getElementById('cfg-prov-url').value.trim().replace(/\/+$/, '');
+  const key = document.getElementById('cfg-prov-key').value.trim();
+  if (!name || !url || !key) { alert('请填写服务商名称、URL 和 Key'); return; }
+  if (!config.providers) config.providers = [];
+  config.providers.push({ name, baseURL: url, apiKey: key, models: [], defaultModel: '' });
+  document.getElementById('cfg-prov-name').value = '';
+  document.getElementById('cfg-prov-url').value = '';
+  document.getElementById('cfg-prov-key').value = '';
+  saveConfig();
+  renderProvidersList();
+  renderProviderSelect();
+  // 自动拉取新服务商的模型
+  fetchModelsForProvider(config.providers.length - 1);
+}
+
+function deleteProvider(idx) {
+  config.providers.splice(idx, 1);
+  if (config.currentProvider === idx) {
+    config.currentProvider = -1;
+  } else if (config.currentProvider > idx) {
+    config.currentProvider--;
+  }
+  saveConfig();
+  renderProvidersList();
+  renderProviderSelect();
+  applyCurrentProvider();
+}
+
+function useProvider(idx) {
+  config.currentProvider = idx;
+  saveConfig();
+  renderProvidersList();
+  renderProviderSelect();
+  applyCurrentProvider();
+}
+
+function switchProvider() {
+  const sel = document.getElementById('provider-select');
+  const idx = parseInt(sel.value);
+  config.currentProvider = idx;
+  saveConfig();
+  applyCurrentProvider();
+  renderProvidersList();
+}
+
+function applyCurrentProvider() {
+  const idx = config.currentProvider;
+  if (idx >= 0 && config.providers && config.providers[idx]) {
+    const p = config.providers[idx];
+    config.baseURL = p.baseURL;
+    config.apiKey = p.apiKey;
+    config.models = p.models || [];
+    config.defaultModel = p.defaultModel || (config.models[0] || '');
+  }
+  renderModelSelect();
+}
+
+async function fetchModelsForProvider(idx) {
+  const p = config.providers[idx];
+  if (!p || !p.baseURL || !p.apiKey) return;
+  try {
+    const resp = await fetch(`${p.baseURL}/v1/models`, {
+      headers: { 'Authorization': `Bearer ${p.apiKey}` }
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.data && data.data.length) {
+      p.models = data.data.map(m => m.id).sort();
+      p.defaultModel = p.defaultModel || p.models[0];
+      saveConfig();
+      renderProvidersList();
+      if (config.currentProvider === idx) applyCurrentProvider();
+    }
+  } catch (e) {}
+}
+
 function openSettings() {
   document.getElementById('cfg-url').value = config.baseURL;
   document.getElementById('cfg-key').value = config.apiKey;
@@ -889,7 +1009,8 @@ function openSettings() {
   document.getElementById('stat-sessions').textContent = `对话: ${sessions.length}`;
   const totalTokens = sessions.reduce((s, sess) => s + (sess.totalTokens || 0), 0);
   document.getElementById('stat-tokens').textContent = `Tokens: ${totalTokens}`;
-  renderModelSelect(); // 刷新设置页里的模型列表和下拉菜单
+  renderProvidersList();
+  renderModelSelect();
   document.getElementById('settings-modal').style.display = 'flex';
 }
 

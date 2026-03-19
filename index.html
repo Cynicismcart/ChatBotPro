@@ -41,6 +41,7 @@
       <button id="btn-menu" class="icon-btn menu-btn">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
+      <select id="provider-select" class="provider-select" title="切换服务商"></select>
       <select id="model-select" class="model-select"></select>
       <span id="token-count" class="token-count"></span>
       <button id="btn-export" class="icon-btn" title="导出">
@@ -90,6 +91,15 @@
         <button class="icon-btn modal-close" data-modal="settings-modal">✕</button>
       </div>
       <div class="modal-body">
+        <label>服务商管理</label>
+        <div id="cfg-providers" class="providers-list"></div>
+        <div class="provider-add-row">
+          <input id="cfg-prov-name" type="text" placeholder="服务商名称（如 Rabbit）" style="flex:1">
+          <input id="cfg-prov-url" type="url" placeholder="Base URL" style="flex:2">
+          <input id="cfg-prov-key" type="password" placeholder="API Key" style="flex:2">
+          <button id="btn-add-provider" class="secondary-btn" style="white-space:nowrap">添加</button>
+        </div>
+        <label>当前手动配置（不使用服务商时）</label>
         <label>API Base URL</label>
         <input id="cfg-url" type="url" placeholder="https://api.example.com">
         <label>API Key</label>
