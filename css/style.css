@@ -709,7 +709,7 @@ body {
   border-radius: 8px;
   border: 1.5px solid var(--border);
   background: var(--bg2);
-  color: var(--text1);
+  color: var(--text);
   font-size: 13px;
   cursor: pointer;
   max-width: 120px;
@@ -750,7 +750,7 @@ body {
 .provider-item-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text1);
+  color: var(--text);
 }
 
 .provider-item-url {
@@ -813,7 +813,7 @@ body {
   position: fixed;
   top: 0; right: 0; bottom: 0;
   width: 360px;
-  background: var(--bg1);
+  background: var(--bg);
   border-left: 1.5px solid var(--border);
   z-index: 20;
   display: flex;
@@ -848,7 +848,7 @@ body {
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--text1);
+  color: var(--text);
 }
 
 .dr-panel-icon {
@@ -902,7 +902,7 @@ body {
   justify-content: center;
 }
 
-.dr-close-btn:hover { background: var(--bg3); color: var(--text1); }
+.dr-close-btn:hover { background: var(--bg3); color: var(--text); }
 
 /* 进度条 */
 .dr-panel-progress {
@@ -986,7 +986,7 @@ body {
 .dr-collapse-body {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--border);
-  background: var(--bg1);
+  background: var(--bg);
 }
 
 .dr-collapsible-section.collapsed .dr-collapse-body { display: none; }
@@ -1101,7 +1101,7 @@ body {
 
 .dr-step-text {
   font-size: 13px;
-  color: var(--text1);
+  color: var(--text);
   line-height: 1.4;
   word-break: break-all;
   overflow: hidden;
@@ -1171,7 +1171,7 @@ body {
 .dr-source-title {
   font-size: 13px;
   font-weight: 500;
-  color: var(--text1);
+  color: var(--text);
   margin-bottom: 3px;
   overflow: hidden;
   display: -webkit-box;
@@ -1281,7 +1281,7 @@ body {
 .dr-result-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text1);
+  color: var(--text);
 }
 
 .dr-result-stat {
@@ -1322,7 +1322,7 @@ body {
 
 .dr-result-report h1,.dr-result-report h2,.dr-result-report h3 {
   margin: 16px 0 8px;
-  color: var(--text1);
+  color: var(--text);
 }
 
 .dr-result-report p { margin: 0 0 10px; }

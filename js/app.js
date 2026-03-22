@@ -279,6 +279,13 @@ function renderMessage(msg, index) {
     const meta = msg.drMeta;
     const mm = String(Math.floor(meta.elapsed / 60)).padStart(2,'0');
     const ss = String(meta.elapsed % 60).padStart(2,'0');
+    const statsHtml = [
+      meta.rounds ? `<span class="dr-result-stat">${meta.rounds} 轮</span>` : '',
+      `<span class="dr-result-stat">${meta.steps} 步</span>`,
+      `<span class="dr-result-stat">${meta.sources} 个来源</span>`,
+      meta.pagesRead ? `<span class="dr-result-stat">${meta.pagesRead} 页</span>` : '',
+      `<span class="dr-result-stat">${mm}:${ss}</span>`
+    ].filter(Boolean).join('<span class="dr-result-dot">·</span>');
     let reportHtml = marked.parse(msg.content || '');
     if (msg.sources && msg.sources.length > 0) {
       reportHtml = reportHtml.replace(/\[(\d+)\]/g, (match, num) => {
@@ -296,11 +303,7 @@ function renderMessage(msg, index) {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </div>
             <span class="dr-result-label">深度研究完成</span>
-            <span class="dr-result-stat">${meta.steps} 步</span>
-            <span class="dr-result-dot">·</span>
-            <span class="dr-result-stat">${meta.sources} 个来源</span>
-            <span class="dr-result-dot">·</span>
-            <span class="dr-result-stat">${mm}:${ss}</span>
+            ${statsHtml}
           </div>
           <svg class="dr-result-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
@@ -418,10 +421,14 @@ function updateDRPanel() {
     if (planSec) planSec.style.display = 'block';
     if (planText) {
       planText.innerHTML = state.outline.map(item => {
-        const icon = item.status === 'done' ? '✓' : item.status === 'active' ? '▶' : '○';
+        const icon = item.status === 'done' ? '✓' : item.status === 'active' ? '◔' : '○';
+        const meta = [];
+        if (Number.isFinite(item.coverage) && item.coverage > 0) meta.push(`${item.coverage}%`);
+        if (item.evidenceCount > 0) meta.push(`${item.evidenceCount} 源`);
+        if (item.reason && item.status !== 'done') meta.push(item.reason);
         return `<div class="dr-outline-item ${item.status||'pending'}">
           <span class="dr-outline-icon">${icon}</span>
-          <span>${escapeHtml(item.topic)}</span>
+          <span>${escapeHtml(item.topic)}${meta.length ? ` · ${escapeHtml(meta.join(' · '))}` : ''}</span>
         </div>`;
       }).join('');
     }
@@ -434,8 +441,8 @@ function updateDRPanel() {
   // 步骤列表
   const stepsList = document.getElementById('dr-steps-list');
   if (stepsList) {
-    const typeLabel = { plan: '计划', search: '搜索', read: '阅读', report: '报告' };
-    const iconMap = { done: '✓', active: '▶', error: '✕', pending: '·' };
+    const typeLabel = { plan: '计划', round: '轮次', reflect: '反思', search: '搜索', read: '阅读', synthesize: '整理', report: '报告' };
+    const iconMap = { done: '✓', active: '◔', error: '!', pending: '·' };
     stepsList.innerHTML = state.steps.map(step => {
       const tLabel = typeLabel[step.type] || step.type;
       const icon = iconMap[step.status] || '·';
@@ -459,9 +466,17 @@ function updateDRPanel() {
     if (srcPanel) srcPanel.style.display = 'block';
     if (srcCount) srcCount.textContent = sourceCount;
     if (srcChips) {
-      srcChips.innerHTML = state.sources.map(s => {
+      const orderedSources = state.sources.slice().sort((a, b) => {
+        const aRank = a.analyzed ? 2 : a.status === 'error' ? 0 : 1;
+        const bRank = b.analyzed ? 2 : b.status === 'error' ? 0 : 1;
+        return bRank - aRank || b.index - a.index;
+      });
+      srcChips.innerHTML = orderedSources.map(s => {
         const domain = getDomain(s.url);
         const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+        const status = s.status === 'analyzed' ? '已提炼' : s.status === 'noted' ? '已摘录' : s.status === 'error' ? '读取失败' : '已发现';
+        const topic = s.coveredTopics?.[0] || s.topics?.[0] || '';
+        const snippet = [status, topic, (s.summary || s.snippet || '').slice(0, 120)].filter(Boolean).join(' · ');
         return `<a class="dr-source-card" href="${escapeHtml(s.url)}" target="_blank">
           <div class="dr-source-card-top">
             <img src="${favicon}" alt="" onerror="this.style.display='none'">
@@ -469,7 +484,7 @@ function updateDRPanel() {
             <span class="dr-source-num">[${s.index}]</span>
           </div>
           <div class="dr-source-title">${escapeHtml((s.title||'').slice(0,80))}</div>
-          <div class="dr-source-snippet">${escapeHtml((s.snippet||'').slice(0,120))}</div>
+          <div class="dr-source-snippet">${escapeHtml(snippet)}</div>
         </a>`;
       }).join('');
     }
@@ -518,6 +533,8 @@ async function handleDeepResearch() {
   if (stepsList) stepsList.innerHTML = '';
   const fill = document.getElementById('dr-progress-fill');
   if (fill) { fill.style.width = '5%'; fill.classList.add('running'); }
+  const stopBtn = document.getElementById('dr-stop-btn');
+  if (stopBtn) stopBtn.style.display = 'flex';
 
   // 计时器
   const timerInterval = setInterval(() => {
@@ -552,8 +569,11 @@ async function handleDeepResearch() {
       aiMsg.deepResearch = false;
       // 保存研究元数据用于渲染
       aiMsg.drMeta = {
+        rounds: window.researchState.stats.roundsCompleted,
         steps: window.researchState.steps.length,
         sources: sources.length,
+        pagesRead: window.researchState.stats.pagesRead,
+        searches: window.researchState.stats.searches,
         elapsed: window.researchState.startTime ? Math.floor((Date.now() - window.researchState.startTime) / 1000) : 0
       };
       // 进度条到100%
@@ -572,6 +592,8 @@ async function handleDeepResearch() {
       aiMsg.content = aiMsg.content || `研究失败: ${err}`;
       aiMsg.streaming = false;
       aiMsg.deepResearch = false;
+      const stopBtn = document.getElementById('dr-stop-btn');
+      if (stopBtn) stopBtn.style.display = 'none';
       setStreamingUI(false);
       saveSessions();
       renderChat();

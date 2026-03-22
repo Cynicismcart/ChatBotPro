@@ -16,11 +16,12 @@ export default {
       return proxyAPI(request, url);
     }
 
-    // 网页阅读端点: ?read=URL
+    // 网页阅读端点: ?read=URL&maxLen=12000
     const readUrl = url.searchParams.get('read');
     if (readUrl) {
+      const maxLen = parseInt(url.searchParams.get('maxLen') || '12000');
       try {
-        const result = await readWebPage(readUrl);
+        const result = await readWebPage(readUrl, maxLen);
         return json(result);
       } catch (err) {
         return json({ error: err.message }, 500);
@@ -230,9 +231,9 @@ async function searchDuckDuckGo(query, count) {
   return results;
 }
 
-async function readWebPage(targetUrl) {
+async function readWebPage(targetUrl, maxLen = 12000) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
     const resp = await fetch(targetUrl, {
@@ -272,7 +273,7 @@ async function readWebPage(targetUrl) {
     await transformed.text();
 
     let content = textChunks.join(' ').replace(/\s+/g, ' ').trim();
-    if (content.length > 4000) content = content.slice(0, 4000) + '...';
+    if (content.length > maxLen) content = content.slice(0, maxLen) + '...';
 
     return { title: title.trim(), content, url: targetUrl };
   } catch (err) {
